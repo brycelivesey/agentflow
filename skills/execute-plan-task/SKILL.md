@@ -1,15 +1,35 @@
 ---
 name: execute-plan-task
-description: Use when executing a planned task from an agentflow plan. This skill runs one task at a time through a disciplined multi-agent workflow (implement, review, test, document) and creates a PR for human review. Triggers on phrases like "execute task", "run task", "start task", "implement task", "execute plan task", "work on task N".
+description: Use when executing a planned task from an agentflow plan. This skill runs one task at a time through a disciplined sequential sub-agent workflow (implement, review, test, document) and creates a PR for human review. Triggers on phrases like "execute task", "run task", "start task", "implement task", "execute plan task", "work on task N".
 ---
 
 # Execute Plan Task
 
 ## Overview
 
-Execute exactly **one task** from an `.agentflow/plans/` plan file through an orchestrated multi-agent workflow. Each run takes a single task through implementation, independent review, testing, artifact generation, and PR creation. The skill enforces quality gates at every stage and produces human-reviewable artifacts alongside the code change.
+Execute exactly **one task** from an `.agentflow/plans/` plan file through an orchestrated sequential sub-agent workflow. Each run takes a single task through implementation, independent review, testing, artifact generation, and PR creation. The skill enforces quality gates at every stage and produces human-reviewable artifacts alongside the code change.
 
 **Scope:** One task per invocation. To execute multiple tasks, invoke this skill once per task in dependency order.
+
+## Execution Mode (Required)
+
+Use **sequential sub-agent orchestration** only.
+
+- Do NOT create or rely on agent teams.
+- Spawn one role at a time in this strict order: implementer -> reviewer -> tester -> reporter.
+- Wait for each role to complete before moving to the next role.
+- Keep exactly one active role thread at a time unless the user explicitly asks for parallelization.
+
+### Context Handling Rule
+
+Do not assume a spawned agent will have complete parent context. For every role handoff, pass a compact context packet containing:
+
+- Task metadata: description, acceptance criteria, dependencies, layer, files likely affected
+- Current branch and relevant diff/state
+- Inputs required for the role (for example implementer notes, reviewer findings, tester failures)
+- Exact expected output format and pass/fail criteria
+
+This prevents context loss and redundant repo exploration between roles.
 
 ## Execution Contract
 
@@ -97,7 +117,7 @@ These gates **must** pass before a run can reach `completed`. There are no overr
 - No PR is created.
 - The user is informed with a clear summary and recommended next steps (re-plan, adjust scope, or unblock dependencies).
 
-## Multi-Agent Role Workflow
+## Sequential Role Workflow (No Teams)
 
 This skill uses four specialized roles executed sequentially within a single orchestrated run. Each role operates with a focused mandate and produces explicit outputs that feed into the next stage. The orchestrator (this skill) manages transitions, enforces gates, and handles iteration.
 
@@ -267,6 +287,7 @@ This skill uses four specialized roles executed sequentially within a single orc
 3. The tester only runs after the reviewer passes. No point testing code that fails review.
 4. The reporter only runs after both reviewer and tester pass. Artifacts reflect the final state.
 5. Iteration cycles always restart at the implementer and proceed forward through the gates again.
+6. Team mode is out of scope for this skill. Use sequential role threads only.
 
 ### Iteration and Conflict Resolution
 
