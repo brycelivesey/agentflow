@@ -1,0 +1,62 @@
+name: Task
+description: An executable task from an agentflow plan. Parseable by automation.
+labels: ["status:todo"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What this task accomplishes.
+      placeholder: Describe the task in concrete terms.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: How we know this task is done. Each criterion on its own line.
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: |
+        Issues that must be completed before this task can start.
+        Use the format: `#<number>` for each dependency, comma-separated.
+        Example: `#1, #3`
+        Write `None` if there are no dependencies.
+      placeholder: "None"
+    validations:
+      required: true
+
+  - type: textarea
+    id: files-likely-affected
+    attributes:
+      label: Files Likely Affected
+      description: List of files or directories this task will likely touch.
+      placeholder: |
+        - `src/foo.ts`
+        - `tests/foo.test.ts`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      description: The architectural layer this task primarily operates in.
+      options:
+        - data
+        - api
+        - ui
+        - test
+        - infra
+        - docs
+    validations:
+      required: true

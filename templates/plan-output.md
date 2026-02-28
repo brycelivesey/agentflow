@@ -17,14 +17,31 @@
 
 ## Tasks
 
-### Task 1: [Name]
-- **Description:** What this task accomplishes
-- **Acceptance Criteria:** How we know it's done
-- **Dependencies:** What must land before this
-- **Files likely affected:** [list]
-- **Layer:** data / api / ui / test / infra
+Tasks are tracked as GitHub Issues using the `task` issue template.
+Each task issue includes: Description, Acceptance Criteria, Dependencies, Files Likely Affected, and Layer.
 
-### Task 2: [Name]
+### Status Labels
+
+| Label | Meaning |
+|-------|---------|
+| `status:todo` | Task is defined but not yet started |
+| `status:in-progress` | Task is actively being worked on |
+| `status:blocked` | Task cannot proceed (dependency unmet or other blocker) |
+
+### Dependency Encoding
+
+Dependencies between tasks are encoded in each issue's **Dependencies** field
+using GitHub issue references: `#<number>`, comma-separated.
+
+Example: `#1, #3` means the task depends on issues #1 and #3 being completed first.
+`None` means the task has no dependencies.
+
+### Task List
+
+| Task | Issue | Status | Dependencies |
+|------|-------|--------|--------------|
+| Task 1: [Name] | #TBD | `status:todo` | None |
+| Task 2: [Name] | #TBD | `status:todo` | #TBD |
 ...
 
 ## Open Questions
