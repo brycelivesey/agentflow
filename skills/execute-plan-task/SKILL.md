@@ -21,7 +21,7 @@ This section defines the inputs, outputs, statuses, and non-negotiable gates for
 |-------|--------|----------|-------------|
 | Plan file | `.agentflow/plans/<YYYY-MM-DD>-<feature-name>.md` | Yes | The plan containing the task to execute |
 | Task identifier | User specifies (e.g., "task 1", "Task 3: Encode Multi-Agent Role Workflow") | Yes | Which task within the plan to execute |
-| Working branch | Current branch | Yes | The branch where implementation happens (user manages branch creation) |
+| Working branch | Current branch or auto-created | Yes | The branch where implementation happens (auto-created from `origin/main` if on `main`) |
 
 **Task resolution:** The skill reads the specified plan file, locates the task by number or name, and extracts:
 - Description
@@ -480,9 +480,9 @@ Once all gates pass and artifacts are generated, the skill enters `packaging` st
 
 ### Branch Preparation
 
-The skill assumes the user has already created a feature branch in their working clone. The skill does NOT create branches.
+If the current branch is `main`, the skill automatically creates a feature branch from `origin/main`:
 
-1. **Verify branch.** Confirm the current branch is not `main`. If on `main`, stop and ask the user to create a feature branch first.
+1. **Check branch.** If on `main`, fetch `origin/main` and create a new branch named `<type>/<task-slug>` (e.g., `docs/create-minimal-external-readme`) from `origin/main`, then switch to it. If already on a feature branch, use it as-is.
 
 2. **Push the branch.** Push to the remote with `-u` to set upstream tracking.
 
