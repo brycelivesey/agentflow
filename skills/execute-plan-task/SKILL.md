@@ -1,631 +1,322 @@
 ---
 name: execute-plan-task
-description: Use when executing a planned task from an agentflow plan. This skill runs one task at a time through a disciplined sequential sub-agent workflow (implement, review, test, document) and creates a PR for human review. Triggers on phrases like "execute task", "run task", "start task", "implement task", "execute plan task", "work on task N".
+description: Use when executing one GitHub Issue task created by the planning-meeting skill. This skill runs one issue at a time through a strict sequential workflow (implement, review, test, summarize) and creates a PR with a concise trust-focused summary. Triggers on phrases like "execute task", "run task", "start task", "implement task", "work on issue #N", or "execute issue N".
 ---
 
 # Execute Plan Task
 
 ## Overview
 
-Execute exactly **one task** from an `.agentflow/plans/` plan file through an orchestrated sequential sub-agent workflow. Each run takes a single task through implementation, independent review, testing, artifact generation, and PR creation. The skill enforces quality gates at every stage and produces human-reviewable artifacts alongside the code change.
+Execute exactly one GitHub Issue task through a sequential multi-role workflow:
 
-**Scope:** One task per invocation. To execute multiple tasks, invoke this skill once per task in dependency order.
+`implementer -> reviewer -> tester -> reporter`
 
-## Execution Mode (Required)
+Issue-only contract:
+- Input is a GitHub Issue number/URL, not a markdown plan file.
+- The issue body must follow `templates/github-issue-task.md`.
+- The PR summary must be concise and trust-focused.
 
-Use **sequential sub-agent orchestration** only.
+Scope:
+- One issue per invocation.
+- To execute multiple tasks, run this skill once per issue in dependency order.
 
-- Do NOT create or rely on agent teams.
-- Spawn one role at a time in this strict order: implementer -> reviewer -> tester -> reporter.
-- Wait for each role to complete before moving to the next role.
-- Keep exactly one active role thread at a time unless the user explicitly asks for parallelization.
+## Required Execution Mode
 
-### Context Handling Rule
+Use sequential sub-agent orchestration only:
+- Spawn one role at a time in strict order.
+- Wait for each role to finish before continuing.
+- Keep one active role thread unless the user explicitly requests parallel execution.
 
-Do not assume a spawned agent will have complete parent context. For every role handoff, pass a compact context packet containing:
-
-- Task metadata: description, acceptance criteria, dependencies, layer, files likely affected
-- Current branch and relevant diff/state
-- Inputs required for the role (for example implementer notes, reviewer findings, tester failures)
+For each role handoff, pass a compact context packet containing:
+- Issue metadata (description, acceptance criteria, dependencies, layer, file hints)
+- Current branch and diff status
+- Inputs needed by the next role
 - Exact expected output format and pass/fail criteria
 
-This prevents context loss and redundant repo exploration between roles.
+## Inputs
 
-## Execution Contract
+| Input | Required | Description |
+|---|---|---|
+| Issue identifier | Yes | GitHub issue number or URL for one executable task |
+| Working branch | Yes | Current branch, or auto-create from `origin/main` when on `main` |
 
-This section defines the inputs, outputs, statuses, and non-negotiable gates for a single-task execution run.
+## Preflight (Required)
 
-### Inputs
+Run and require success:
 
-| Input | Source | Required | Description |
-|-------|--------|----------|-------------|
-| Plan file | `.agentflow/plans/<YYYY-MM-DD>-<feature-name>.md` | Yes | The plan containing the task to execute |
-| Task identifier | User specifies (e.g., "task 1", "Task 3: Encode Multi-Agent Role Workflow") | Yes | Which task within the plan to execute |
-| Working branch | Current branch or auto-created | Yes | The branch where implementation happens (auto-created from `origin/main` if on `main`) |
-
-**Task resolution:** The skill reads the specified plan file, locates the task by number or name, and extracts:
-- Description
-- Acceptance criteria
-- Dependencies
-- Files likely affected
-- Layer
-
-**Dependency check:** Before execution begins, verify all listed dependencies are satisfied. A dependency is satisfied when its corresponding task has been merged to main or is present on the current branch. If unmet dependencies exist, stop and report which are missing.
-
-### Outputs
-
-Every successful run produces:
-
-| Output | Location | Description |
-|--------|----------|-------------|
-| Implementation | Working branch commits | Code changes fulfilling the task |
-| ADR | Local: `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/adr.md` | Architecture decision record for non-trivial choices made |
-| Implementation report | Local: `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/implementation-report.md` | Summary of what was built, why, and how |
-| Architecture diagram | Local: `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/architecture-diagram.txt` | Text-based diagram of affected components |
-| Verification report | Local: `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/verification.md` | What was tested, how, and results |
-| Pull request | GitHub PR | PR with full artifact content in the body, awaiting human review |
-
-**Artifact locality:** Artifact files are local working state only — they are NOT committed or pushed. Their content is assembled directly into the PR body at packaging time. The `.agentflow/artifacts/` directory is gitignored.
-
-### Statuses
-
-A task run is always in exactly one of these states:
-
-| Status | Meaning |
-|--------|---------|
-| `resolving` | Reading plan, extracting task, checking dependencies |
-| `implementing` | Implementer agent is writing code |
-| `reviewing` | Reviewer agent is performing quality/security/regression review |
-| `testing` | Tester agent is running validation |
-| `reporting` | Reporter agent is generating artifacts |
-| `iterating` | Review or testing found issues; cycling back to implementer |
-| `packaging` | Creating PR-ready branch, summary, and opening PR |
-| `completed` | PR created, all gates passed, awaiting human review |
-| `failed` | A non-negotiable gate failed after max retries, or an unrecoverable error occurred |
-
-### Non-Negotiable Gates
-
-These gates **must** pass before a run can reach `completed`. There are no overrides.
-
-1. **Acceptance criteria met.** Every acceptance criterion listed in the task must be demonstrably satisfied. The reviewer confirms this independently from the implementer.
-
-2. **No regressions introduced.** The reviewer verifies that existing functionality is not broken by the change. If test commands are available, the tester must run them and they must pass.
-
-3. **No security vulnerabilities introduced.** The reviewer checks for OWASP top 10 and any context-specific security concerns. Any finding blocks completion.
-
-4. **Artifacts generated.** All four artifact files must be generated locally and contain substantive content (not stubs or placeholders). Their content is assembled into the PR body.
-
-5. **Clean diff.** The change is scoped to the task — no unrelated modifications, no leftover debug code, no commented-out blocks.
-
-### Retry and Stop Behavior
-
-**Retry policy:**
-- When a gate fails, the run enters `iterating` status.
-- The implementer receives specific feedback from the reviewer or tester describing what failed and why.
-- The implementer makes targeted fixes and the review/test cycle repeats.
-- **Maximum 3 iterations.** After 3 failed review/test cycles on the same gate, the run transitions to `failed`.
-
-**Stop conditions (immediate `failed`, no retry):**
-- Unmet task dependencies discovered after resolution.
-- The task's acceptance criteria are ambiguous or contradictory (escalate to user).
-- A fundamental architectural conflict is discovered that requires re-planning.
-- The implementer determines the task is not achievable as scoped (escalate to user).
-
-**On failure:**
-- The run produces a failure report explaining what was attempted, what failed, and why.
-- The failure report is written to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md`.
-- No PR is created.
-- The user is informed with a clear summary and recommended next steps (re-plan, adjust scope, or unblock dependencies).
-
-## Sequential Role Workflow (No Teams)
-
-This skill uses four specialized roles executed sequentially within a single orchestrated run. Each role operates with a focused mandate and produces explicit outputs that feed into the next stage. The orchestrator (this skill) manages transitions, enforces gates, and handles iteration.
-
-### Role Definitions
-
-#### Implementer
-
-**Mandate:** Write the code that fulfills the task's description and acceptance criteria. Nothing more, nothing less.
-
-**Inputs:**
-- Task description, acceptance criteria, and dependency context from the plan
-- Files likely affected (as starting points, not constraints)
-- Feedback from reviewer/tester (during iteration cycles)
-
-**Responsibilities:**
-- Read and understand the relevant codebase before writing any code
-- Make the minimal change that satisfies all acceptance criteria
-- Follow existing patterns and conventions in the repository
-- Keep the diff scoped — no drive-by refactors, no unrelated cleanup
-- During iteration: make targeted fixes based on specific reviewer/tester feedback
-
-**Outputs:**
-- Committed code changes on the working branch
-- Brief implementation notes: what was changed and why (used by reviewer and reporter)
-
-**Boundaries:**
-- Does NOT self-review or self-test
-- Does NOT generate artifacts
-- Does NOT make architectural decisions that contradict the plan — if the plan seems wrong, escalate
-
-#### Reviewer
-
-**Mandate:** Independently verify the implementation meets all quality gates. The reviewer has NOT seen the implementation process — only the resulting diff and the task requirements.
-
-**Inputs:**
-- The full diff of changes on the working branch
-- Task description and acceptance criteria from the plan
-- Implementer's notes
-- Repository context (existing code, patterns, conventions)
-
-**Responsibilities:**
-- Verify every acceptance criterion is demonstrably met
-- Check for regressions — does the change break existing behavior?
-- Check for security vulnerabilities (OWASP top 10, context-specific concerns)
-- Verify the diff is clean — no debug code, no commented-out blocks, no unrelated changes
-- Verify code follows repository conventions and patterns
-- Produce a clear verdict: **pass** or **fail with specific issues**
-
-**Outputs:**
-- Review verdict: `pass` or `fail`
-- If `fail`: a list of specific, actionable issues, each referencing the file and concern
-- If `pass`: confirmation of which acceptance criteria were verified and how
-
-**Boundaries:**
-- Does NOT write or modify code
-- Does NOT run tests (that's the tester's job)
-- Does NOT soften findings — if something fails a gate, it fails
-- Reviews the diff independently; does not defer to the implementer's notes for correctness
-
-#### Tester
-
-**Mandate:** Run available validation commands and verify the change works as intended through execution, not just inspection.
-
-**Inputs:**
-- The current state of the working branch
-- Task description and acceptance criteria
-- Repository context (available test commands, test frameworks, scripts)
-
-**Responsibilities:**
-- Discover available test commands (look for `package.json` scripts, `Makefile` targets, test directories, CI config)
-- Run relevant test suites — prioritize tests related to the changed code
-- If no formal test commands exist, perform manual verification where possible (e.g., syntax checks, dry runs, build commands)
-- Report exactly what was run and what the results were
-- Produce a clear verdict: **pass** or **fail with specific failures**
-
-**Outputs:**
-- Test verdict: `pass` or `fail`
-- List of commands executed and their results (exit codes, relevant output)
-- If `fail`: specific test failures with enough context for the implementer to fix them
-- If no test commands are available: explicit statement of what was and wasn't verifiable
-
-**Boundaries:**
-- Does NOT write code or fix test failures (sends feedback to implementer)
-- Does NOT write new tests unless the task's acceptance criteria explicitly require it
-- Does NOT skip failing tests or mark known failures as acceptable
-
-#### Reporter
-
-**Mandate:** Produce the artifact package that allows a human to understand what was built, why decisions were made, and what was verified — without reading every line of code.
-
-**Inputs:**
-- Implementer's notes and the final diff
-- Reviewer's verdict and findings
-- Tester's verdict and execution results
-- Task description and plan context
-
-**Responsibilities:**
-- Write `adr.md` — document non-trivial architectural or design decisions made during implementation. If no significant decisions were made, state that explicitly rather than inventing content.
-- Write `implementation-report.md` — summarize what was built, how it fits into the existing system, and any notable implementation details.
-- Write `architecture-diagram.txt` — text-based diagram showing affected components and their relationships.
-- Write `verification.md` — consolidate what the reviewer checked, what the tester ran, and the results.
-- All artifacts go to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/`
-
-**Outputs:**
-- Four artifact files with substantive content (no stubs, no placeholders)
-
-**Boundaries:**
-- Does NOT modify code
-- Does NOT re-run tests or re-review code
-- Does NOT fabricate results — only documents what actually happened
-
-### Workflow Sequencing
-
-```
-┌─────────────┐
-│  resolving   │  Read plan, extract task, check dependencies
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│ implementing │  Implementer writes code
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  reviewing   │  Reviewer inspects diff independently
-└──────┬──────┘
-       │
-       ├── pass ──► tester
-       │
-       └── fail ──► iterating (back to implementer with feedback)
-                         │
-                         ▼
-                    implementer → reviewer (repeat, max 3 cycles)
-       │
-       ▼
-┌─────────────┐
-│   testing    │  Tester runs validation commands
-└──────┬──────┘
-       │
-       ├── pass ──► reporter
-       │
-       └── fail ──► iterating (back to implementer with feedback)
-                         │
-                         ▼
-                    implementer → reviewer → tester (repeat, max 3 cycles total)
-       │
-       ▼
-┌─────────────┐
-│  reporting   │  Reporter generates artifacts
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  packaging   │  Create PR with artifact-based summary
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  completed   │  PR created, awaiting human review
-└─────────────┘
+```bash
+gh auth status
+gh repo view --json nameWithOwner,defaultBranchRef
 ```
 
-**Key sequencing rules:**
-1. Roles execute strictly in order: implementer → reviewer → tester → reporter.
-2. The reviewer never sees the implementation in progress — only the finished diff.
-3. The tester only runs after the reviewer passes. No point testing code that fails review.
-4. The reporter only runs after both reviewer and tester pass. Artifacts reflect the final state.
-5. Iteration cycles always restart at the implementer and proceed forward through the gates again.
-6. Team mode is out of scope for this skill. Use sequential role threads only.
+Stop immediately on failure.
 
-### Iteration and Conflict Resolution
+## Resolve the Task from Issue (Required)
 
-**Iteration triggers:**
-- Reviewer returns `fail` → implementer receives the specific issues and fixes them, then the diff goes back to the reviewer.
-- Tester returns `fail` → implementer receives the specific failures and fixes them, then the full review → test cycle repeats.
+Read the issue:
 
-**Iteration budget:**
-- Maximum **3 iteration cycles** total across all gates combined. An iteration cycle is one round-trip from implementer back through the failing gate.
-- The counter is shared — 2 review failures + 1 test failure = 3 cycles = budget exhausted.
+```bash
+gh issue view <issue_number> --json number,title,body,url,state,labels
+```
 
-**Conflict resolution:**
-- If the reviewer and implementer disagree on whether a finding is valid, the reviewer's judgment prevails. The reviewer is the independent check.
-- If the implementer believes a reviewer finding is incorrect, the implementer must address it anyway or escalate to the user. The implementer cannot override the reviewer.
-- If the tester reports a failure that the implementer believes is a pre-existing issue (not caused by this change), the implementer must document this claim with evidence (e.g., showing the same failure exists on main). The orchestrator then asks the user whether to proceed or stop.
+Extract from issue body:
+- `## Description`
+- `## Acceptance Criteria`
+- `## Dependencies`
+- `## Layer`
+- `## File Hints`
+- `## Status Labels`
 
-**Escalation to user:**
-- Ambiguous or contradictory acceptance criteria
-- Fundamental architectural conflict with the plan
-- Disagreement that cannot be resolved within the iteration budget
-- Pre-existing failures disputed between tester and implementer
-- Task determined to be unachievable as scoped
+Use `templates/github-issue-task.md` as the canonical contract.
 
-### Failure Conditions
+### Schema gate
 
-The run transitions to `failed` immediately (no further iteration) when:
+Before implementation, validate the issue body schema. Required checks:
+- All required section headers exist.
+- `## Layer` is one of `data|api|ui|test|infra`.
+- `## Dependencies` uses only `- none` or `- #<issue_number>` and no duplicates.
+- `## Status Labels` has exactly one entry from `status:todo|status:in-progress|status:done`.
 
-1. **Iteration budget exhausted.** Three cycles completed without all gates passing.
-2. **Unmet dependencies discovered.** A required prior task has not been completed.
-3. **Unresolvable scope conflict.** The task requires changes that fundamentally conflict with the existing architecture or plan.
-4. **User-directed stop.** The user explicitly halts execution after an escalation.
+If schema validation fails, stop and report the exact failure.
 
-On failure, the orchestrator:
-- Stops all role activity
-- Writes a failure report to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md`
-- Does NOT create a PR
-- Reports to the user: what was attempted, what failed, why, and recommended next steps
+### Dependency gate
 
-## Artifact Specifications
+Parse dependency issue numbers from `## Dependencies`.
 
-All artifacts are written to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/` where the date is the execution date and the task slug is derived from the task name (lowercase, hyphens, no special characters). Artifacts are the primary mechanism for human reviewers to understand what happened without reading every line of code or diff.
+For each dependency issue `#N`, require:
 
-**Quality bar:** Every artifact must contain substantive content specific to the task. Stubs, placeholders, boilerplate-only files, or "N/A" sections fail the artifact gate. If a section genuinely does not apply, state why in one sentence.
+```bash
+gh issue view N --json state,labels
+```
 
-### `adr.md` — Architecture Decision Record
+A dependency is satisfied only if:
+- `state` is `CLOSED`, and
+- labels include `status:done`.
 
-Documents non-trivial technical decisions made during implementation. Uses a structured format so decisions are discoverable and reviewable over time.
+If any dependency is not satisfied, stop and report which dependency blocks execution.
+
+### Status gate
+
+The task issue must carry exactly one status label.
+
+At start of execution, set status to `status:in-progress`:
+
+```bash
+gh issue edit <issue_number> \
+  --remove-label status:todo \
+  --add-label status:in-progress
+```
+
+If the issue already has `status:in-progress`, continue.
+If it has `status:done`, stop and ask whether execution should be skipped.
+
+## Outputs
+
+A successful run produces:
+- Implementation commits on a working branch
+- One concise summary file at `.agentflow/artifacts/<YYYY-MM-DD>-issue-<number>/execution-summary.md`
+- One GitHub PR targeting `main`
+- One issue comment linking to the PR
+
+Artifact locality:
+- `.agentflow/artifacts/` files are local working state (gitignored)
+- Do not commit artifact files
+
+## Non-Negotiable Gates
+
+All gates must pass before creating the PR:
+
+1. Acceptance criteria are demonstrably met.
+2. No regressions are introduced.
+3. No new security vulnerabilities are introduced.
+4. Diff is scoped to the issue (no unrelated changes).
+5. Summary is concise and includes the required trust sections.
+
+## Roles
+
+### Implementer
+
+Mandate:
+- Implement the issue with the smallest coherent diff.
+
+Responsibilities:
+- Follow repository conventions and existing architecture.
+- Keep changes scoped to issue acceptance criteria.
+- Produce brief implementation notes for handoff.
+
+Boundaries:
+- Do not self-approve quality gates.
+- Do not produce final summary.
+
+### Reviewer
+
+Mandate:
+- Independently verify correctness and codebase fit.
+
+Responsibilities:
+- Verify every acceptance criterion.
+- Check regressions and security concerns.
+- Check architectural fit with existing system (integration points, pattern consistency, layering).
+- Check diff scope cleanliness.
+- Return verdict: `pass` or `fail` with actionable issues.
+
+Boundaries:
+- Do not edit code.
+- Do not run the test suite.
+
+### Tester
+
+Mandate:
+- Validate behavior through execution.
+
+Responsibilities:
+- Discover available test commands.
+- Run relevant tests for changed scope.
+- If no formal tests exist, run best-available manual/structural checks.
+- Return verdict: `pass` or `fail` with command-level results.
+
+Boundaries:
+- Do not modify code.
+
+### Reporter
+
+Mandate:
+- Produce a short trust summary so humans can review quickly.
+
+Responsibilities:
+- Build `execution-summary.md` with required sections.
+- Keep the summary skimmable and concrete.
+- Favor bullets over long paragraphs.
+
+Boundaries:
+- Do not modify code.
+- Do not fabricate verification results.
+
+## Iteration Policy
+
+On reviewer/tester failure:
+- Return to implementer with specific findings.
+- Re-run reviewer and tester gates after fixes.
+- Maximum 3 cycles.
+
+Stop as `failed` if:
+- Dependency gate fails
+- Issue schema is invalid
+- Acceptance criteria are ambiguous/contradictory
+- Fundamental architectural conflict requires re-planning
+- Iteration budget is exhausted
+
+On failure:
+- Write `.agentflow/artifacts/<YYYY-MM-DD>-issue-<number>/failure-report.md`
+- Comment failure summary on the issue
+- Do not create a PR
+
+## Concise Summary Contract (Required)
+
+The reporter must produce this exact structure in `execution-summary.md`:
 
 ```markdown
-# ADR: <concise decision title>
+# Execution Summary: Issue #<number> - <title>
 
-## Status
-Accepted
+## System Fit
+- Where this change plugs into the existing architecture.
+- What existing components/interfaces were reused.
 
-## Context
-<What problem or question arose during implementation? What constraints
-applied? Reference the task and plan for background.>
+## Data Flow
+- Before: <short path/behavior>
+- After: <short path/behavior>
+- Impacted boundaries: <api/db/queue/ui/etc>
 
-## Decision
-<What was decided and why. Be specific — name the pattern, library,
-approach, or tradeoff chosen.>
+## Decision and Alternatives
+- Chosen approach: <what and why>
+- Alternative considered: <option>
+- Why not chosen: <tradeoff>
 
-## Alternatives Considered
-<List alternatives that were evaluated. For each, one sentence on why
-it was not chosen.>
-
-## Consequences
-<What this decision enables, what it constrains, and any follow-up
-work it creates.>
-```
-
-**Multiple decisions:** If the task required multiple non-trivial decisions, include multiple ADR blocks in the same file, each with its own title.
-
-**No significant decisions:** If the implementation was straightforward with no meaningful design choices, write a single brief ADR stating: what the task was, that the implementation followed existing patterns with no new decisions required, and reference which existing patterns were followed.
-
-### `implementation-report.md` — Implementation Report
-
-Summarizes what was built so a reviewer can understand the change at a high level before (or instead of) reading the full diff.
-
-```markdown
-# Implementation Report: <task name>
-
-## Summary
-<2-4 sentences: what was built and why, in plain language.>
-
-## Changes
-
-### <file or component name>
-- <What changed and why>
-
-### <file or component name>
-- <What changed and why>
-
-<Repeat for each file or logical group of changes.>
-
-## How It Works
-<Explain the runtime behavior or integration of the change. How does a
-user or system interact with what was built? Keep this concrete.>
-
-## Scope and Boundaries
-- **In scope:** <what this change covers>
-- **Out of scope:** <what this change intentionally does not cover>
-- **Assumptions:** <any assumptions the implementation relies on>
-```
-
-**Granularity:** Group changes by logical component, not by individual line edits. A reviewer should finish this file knowing *what changed at a system level* and *why each change was necessary*.
-
-### `architecture-diagram.txt` — Architecture Diagram
-
-A text-based diagram showing how the changed components relate to each other and to the broader system. This file uses plain ASCII or Unicode box-drawing characters so it renders correctly everywhere.
-
-**Requirements:**
-- Show the components that were added or modified by this task
-- Show how they connect to existing components they interact with
-- Label relationships (e.g., "reads from", "calls", "extends", "imports")
-- Mark new or modified components distinctly (e.g., prefix with `[NEW]` or `[MODIFIED]`)
-- Keep it focused on the task scope — this is not a full system architecture diagram
-
-**Example structure:**
-```
-[NEW] skills/execute-plan-task/SKILL.md
-    ├── reads from ──► .agentflow/plans/*.md
-    ├── writes to ──► .agentflow/artifacts/<date>-<slug>/
-    └── triggers ──► gh pr create
-
-[MODIFIED] install.sh
-    └── symlinks ──► skills/execute-plan-task/
-```
-
-**Diagram scope:** If the task only touches a single file with no cross-component interaction, the diagram should still show that file's role in the broader system context — where it sits, what reads it, what it affects.
-
-### `verification.md` — Verification Report
-
-Consolidates everything that was checked and tested, providing an auditable record of quality verification.
-
-```markdown
-# Verification Report: <task name>
-
-## Review Summary
-- **Verdict:** <pass/fail>
-- **Reviewer findings:** <summary of what the reviewer checked and confirmed>
-- **Acceptance criteria verification:**
-  - [ ] <criterion 1> — <how it was verified>
-  - [ ] <criterion 2> — <how it was verified>
-
-## Test Summary
-- **Verdict:** <pass/fail>
-- **Commands executed:**
-  - `<command>` — <result (pass/fail, exit code)>
-  - `<command>` — <result>
-- **Coverage notes:** <what was and wasn't testable>
-
-## Security Check
-- <What was checked and the result. Reference specific concerns if any were found and resolved.>
-
-## Iteration History
-<If iterations occurred, document each cycle:>
-- **Cycle N:** <what failed, what was fixed, outcome of re-review/re-test>
-
-<If no iterations occurred:>
-- No iterations required. All gates passed on first cycle.
-
-## Limitations
-<Anything that could not be verified and why. E.g., "No integration test suite exists; verification was limited to static review and syntax checks.">
-```
-
-**Honesty over completeness:** If something could not be tested or verified, say so. A verification report that claims full coverage when the repo has no tests is worse than one that explicitly states its limitations.
-
-### `failure-report.md` — Failure Report (failure runs only)
-
-Written only when a run transitions to `failed` status. This is not produced by the reporter role — it is written by the orchestrator directly.
-
-```markdown
-# Failure Report: <task name>
-
-## Failure Reason
-<One sentence: why the run failed.>
-
-## What Was Attempted
-<Summary of implementation work completed before failure.>
-
-## Iteration History
-- **Cycle N:** <what was tried, what failed, feedback given>
-
-## Root Cause Analysis
-<Why the failure occurred. Distinguish between: task scoping issues,
-implementation difficulty, pre-existing problems, or ambiguous requirements.>
-
-## Recommended Next Steps
-<Actionable suggestions: re-scope the task, fix a dependency, clarify
-requirements, or re-plan.>
-```
-
-### Artifact Naming Convention
-
-The artifact directory name follows this pattern:
-
-```
-.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/
-```
-
-- **Date:** The date execution started (not when the PR is created)
-- **Task slug:** Derived from the task name by: lowercasing, replacing spaces with hyphens, removing special characters, and truncating to 50 characters
-- **Examples:**
-  - Task "Define Execution Contract" → `2026-02-28-define-execution-contract/`
-  - Task "Scaffold Skill and Trigger Metadata" → `2026-02-28-scaffold-skill-and-trigger-metadata/`
-
-## PR Creation Workflow
-
-Once all gates pass and artifacts are generated, the skill enters `packaging` status and creates a pull request automatically. The human reviews and merges — the skill does not merge.
-
-### Branch Preparation
-
-If the current branch is `main`, the skill automatically creates a feature branch from `origin/main`:
-
-1. **Check branch.** If on `main`, fetch `origin/main` and create a new branch named `<type>/<task-slug>` (e.g., `docs/create-minimal-external-readme`) from `origin/main`, then switch to it. If already on a feature branch, use it as-is.
-
-2. **Push the branch.** Push to the remote with `-u` to set upstream tracking.
-
-**Note:** Artifact files are NOT committed. They remain local in `.agentflow/artifacts/` (gitignored). Their content is assembled into the PR body.
-
-### PR Summary Generation
-
-The PR body is assembled from the local artifact files, not written freehand. This ensures the summary reflects what was actually verified rather than what was intended. Artifact content is placed directly in the PR body — no artifact files are committed.
-
-**PR title format:**
-```
-<type>: <concise description from task name>
-```
-
-Where `<type>` follows conventional commit types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`. Derive the type from the task's layer and description.
-
-**PR body structure:**
-
-```markdown
-## Summary
-<2-4 sentences pulled from implementation-report.md Summary section.>
-
-## Changes
-<Bulleted list from implementation-report.md Changes section. One bullet per file or logical group.>
-
-## Architecture
-<Content from architecture-diagram.txt, wrapped in a code block.>
-
-## Decisions
-<Full content from adr.md. If no significant decisions, state: "No non-trivial architectural decisions were required.">
+## Complexity and Tradeoffs
+- Runtime complexity: <if relevant>
+- Space complexity: <if relevant>
+- Implementation complexity: <low/medium/high and why>
+- Key tradeoff: <simplicity vs efficiency, etc>
 
 ## Verification
-<Full content from verification.md: reviewer verdict, tester verdict, commands run, iteration history, and any noted limitations.>
-
----
-This PR was created automatically by the `execute-plan-task` skill.
-Source plan: `<path to plan file>` | Task: <task number and name>
+- Reviewer verdict: <pass/fail>
+- Tester verdict: <pass/fail>
+- Commands run: <command + result>
+- Residual risks: <what remains unverified>
 ```
 
-### PR Creation
+Guidance:
+- Keep it concise and scannable.
+- No strict line cap, but do not write long narrative sections.
+- Include only decision-relevant detail.
 
-Create the PR using `gh pr create`:
+## PR Packaging Workflow
+
+After all gates pass:
+
+1. Prepare branch
+
+If current branch is `main`, create a feature branch from `origin/main` using a task slug.
+
+2. Commit scoped changes
+
+Commit only files required for this issue.
+
+3. Assemble PR body from summary
+
+Use `execution-summary.md` as the primary body content.
+
+Suggested PR body layout:
+
+```markdown
+## Summary
+<2-4 sentence plain-language summary>
+
+## Trust Snapshot
+<content from execution-summary.md sections>
+
+---
+Source issue: #<number> <issue_url>
+```
+
+4. Create PR
 
 ```bash
 gh pr create \
-  --title "<type>: <description>" \
-  --body "<assembled body>" \
+  --title "<type>: <issue title>" \
+  --body-file <assembled-pr-body-file> \
   --base main \
   --head <branch-name>
 ```
 
-**Rules:**
-- The PR always targets `main` (trunk-based development).
-- No reviewers, labels, or assignees are set automatically — the human decides review routing.
-- If `gh pr create` fails (e.g., no remote, auth issue), the run transitions to `failed` with the error captured in a failure report. The implementation is preserved on the branch; artifacts remain local.
+5. Link PR back to issue
 
-### Post-PR State
-
-After the PR is created:
-- The run transitions to `completed`.
-- The PR URL is reported to the user.
-- The skill's job is done. Merging, requesting reviews, and responding to PR feedback are human responsibilities.
-- If the human requests changes during PR review, they invoke this skill again or make changes manually — the skill does not watch for PR comments.
-
-### PR for Failed Runs
-
-No PR is created when a run fails. The failure report at `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md` remains local as a diagnostic record. If the branch has partial work, it remains on the branch but is not submitted as a PR.
-
-## CI Integration (Deferred — v1)
-
-Continuous integration is intentionally **not included** in v1 of this skill. Repository CI configurations vary widely (GitHub Actions, CircleCI, Jenkins, Makefiles, custom scripts), and hardcoding assumptions would make the skill brittle across different projects.
-
-**What the tester does today (v1):**
-- Discovers and runs test commands available locally (package.json scripts, Makefile targets, test directories)
-- Reports exactly what was and wasn't verifiable
-- Documents gaps explicitly in the verification report
-
-**What CI integration will add (future):**
-- Trigger repo-specific CI pipelines after implementation
-- Wait for CI results before advancing through gates
-- Include CI output in the verification report and PR summary
-
-### CI Configuration Placeholder
-
-When CI integration is added, it will be driven by an optional config section in the plan file or a repo-level `.agentflow/ci.yml` file. The expected schema:
-
-```yaml
-# .agentflow/ci.yml (future — not yet implemented)
-# TODO: Define and implement CI integration
-
-ci:
-  # Command to run the full CI pipeline locally or trigger it remotely
-  run: ""
-  # Example values:
-  #   "npm test"
-  #   "make ci"
-  #   "gh workflow run ci.yml && gh run watch"
-
-  # How to check if CI passed (exit code 0 = pass)
-  check: ""
-  # Example values:
-  #   "npm test"
-  #   "gh run view --exit-status"
-
-  # Timeout in seconds before treating CI as failed
-  timeout: 600
-
-  # Whether CI must pass before PR creation (vs. advisory-only)
-  required: true
+```bash
+gh issue comment <issue_number> --body "Opened PR: <pr_url>"
 ```
 
-### Integration Points
+6. Status after PR creation
 
-When implemented, CI hooks into the workflow at two points:
+- Keep issue at `status:in-progress` while PR is under review.
+- Move to `status:done` only after human acceptance/merge.
 
-1. **Post-tester, pre-reporter.** After local tests pass, trigger CI. If CI fails, enter `iterating` and send failures back to the implementer (counts against the iteration budget).
+## Failure Policy
 
-2. **Post-packaging (advisory).** If `required: false`, CI runs after PR creation and results are added as a PR comment rather than blocking the workflow.
+Fail fast on any of:
+- Preflight command failures
+- Issue schema validation failures
+- Dependency gate failures
+- Required review/test gate failures after max iterations
+- PR creation failure
 
-### Until Then
+Failure report must include:
+- Failed command or gate
+- Error category (`auth|network|permissions|schema|dependency|test|review|other`)
+- Suggested corrective action
 
-The tester role remains the sole validation stage. The verification report must explicitly state:
-- "CI integration is not configured for this repository."
-- What local validation was performed as a substitute.
-- Any test coverage gaps the human reviewer should be aware of.
+## Key Principles
+
+- Execute one issue at a time.
+- Optimize for trust and reviewer speed.
+- Prioritize architectural fit and data-flow clarity over verbose narration.
+- Keep summaries concise, concrete, and decision-oriented.
