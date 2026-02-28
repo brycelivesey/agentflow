@@ -94,3 +94,211 @@ These gates **must** pass before a run can reach `completed`. There are no overr
 - The failure report is written to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md`.
 - No PR is created.
 - The user is informed with a clear summary and recommended next steps (re-plan, adjust scope, or unblock dependencies).
+
+## Multi-Agent Role Workflow
+
+This skill uses four specialized roles executed sequentially within a single orchestrated run. Each role operates with a focused mandate and produces explicit outputs that feed into the next stage. The orchestrator (this skill) manages transitions, enforces gates, and handles iteration.
+
+### Role Definitions
+
+#### Implementer
+
+**Mandate:** Write the code that fulfills the task's description and acceptance criteria. Nothing more, nothing less.
+
+**Inputs:**
+- Task description, acceptance criteria, and dependency context from the plan
+- Files likely affected (as starting points, not constraints)
+- Feedback from reviewer/tester (during iteration cycles)
+
+**Responsibilities:**
+- Read and understand the relevant codebase before writing any code
+- Make the minimal change that satisfies all acceptance criteria
+- Follow existing patterns and conventions in the repository
+- Keep the diff scoped — no drive-by refactors, no unrelated cleanup
+- During iteration: make targeted fixes based on specific reviewer/tester feedback
+
+**Outputs:**
+- Committed code changes on the working branch
+- Brief implementation notes: what was changed and why (used by reviewer and reporter)
+
+**Boundaries:**
+- Does NOT self-review or self-test
+- Does NOT generate artifacts
+- Does NOT make architectural decisions that contradict the plan — if the plan seems wrong, escalate
+
+#### Reviewer
+
+**Mandate:** Independently verify the implementation meets all quality gates. The reviewer has NOT seen the implementation process — only the resulting diff and the task requirements.
+
+**Inputs:**
+- The full diff of changes on the working branch
+- Task description and acceptance criteria from the plan
+- Implementer's notes
+- Repository context (existing code, patterns, conventions)
+
+**Responsibilities:**
+- Verify every acceptance criterion is demonstrably met
+- Check for regressions — does the change break existing behavior?
+- Check for security vulnerabilities (OWASP top 10, context-specific concerns)
+- Verify the diff is clean — no debug code, no commented-out blocks, no unrelated changes
+- Verify code follows repository conventions and patterns
+- Produce a clear verdict: **pass** or **fail with specific issues**
+
+**Outputs:**
+- Review verdict: `pass` or `fail`
+- If `fail`: a list of specific, actionable issues, each referencing the file and concern
+- If `pass`: confirmation of which acceptance criteria were verified and how
+
+**Boundaries:**
+- Does NOT write or modify code
+- Does NOT run tests (that's the tester's job)
+- Does NOT soften findings — if something fails a gate, it fails
+- Reviews the diff independently; does not defer to the implementer's notes for correctness
+
+#### Tester
+
+**Mandate:** Run available validation commands and verify the change works as intended through execution, not just inspection.
+
+**Inputs:**
+- The current state of the working branch
+- Task description and acceptance criteria
+- Repository context (available test commands, test frameworks, scripts)
+
+**Responsibilities:**
+- Discover available test commands (look for `package.json` scripts, `Makefile` targets, test directories, CI config)
+- Run relevant test suites — prioritize tests related to the changed code
+- If no formal test commands exist, perform manual verification where possible (e.g., syntax checks, dry runs, build commands)
+- Report exactly what was run and what the results were
+- Produce a clear verdict: **pass** or **fail with specific failures**
+
+**Outputs:**
+- Test verdict: `pass` or `fail`
+- List of commands executed and their results (exit codes, relevant output)
+- If `fail`: specific test failures with enough context for the implementer to fix them
+- If no test commands are available: explicit statement of what was and wasn't verifiable
+
+**Boundaries:**
+- Does NOT write code or fix test failures (sends feedback to implementer)
+- Does NOT write new tests unless the task's acceptance criteria explicitly require it
+- Does NOT skip failing tests or mark known failures as acceptable
+
+#### Reporter
+
+**Mandate:** Produce the artifact package that allows a human to understand what was built, why decisions were made, and what was verified — without reading every line of code.
+
+**Inputs:**
+- Implementer's notes and the final diff
+- Reviewer's verdict and findings
+- Tester's verdict and execution results
+- Task description and plan context
+
+**Responsibilities:**
+- Write `adr.md` — document non-trivial architectural or design decisions made during implementation. If no significant decisions were made, state that explicitly rather than inventing content.
+- Write `implementation-report.md` — summarize what was built, how it fits into the existing system, and any notable implementation details.
+- Write `architecture-diagram.txt` — text-based diagram showing affected components and their relationships.
+- Write `verification.md` — consolidate what the reviewer checked, what the tester ran, and the results.
+- All artifacts go to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/`
+
+**Outputs:**
+- Four artifact files with substantive content (no stubs, no placeholders)
+
+**Boundaries:**
+- Does NOT modify code
+- Does NOT re-run tests or re-review code
+- Does NOT fabricate results — only documents what actually happened
+
+### Workflow Sequencing
+
+```
+┌─────────────┐
+│  resolving   │  Read plan, extract task, check dependencies
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ implementing │  Implementer writes code
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  reviewing   │  Reviewer inspects diff independently
+└──────┬──────┘
+       │
+       ├── pass ──► tester
+       │
+       └── fail ──► iterating (back to implementer with feedback)
+                         │
+                         ▼
+                    implementer → reviewer (repeat, max 3 cycles)
+       │
+       ▼
+┌─────────────┐
+│   testing    │  Tester runs validation commands
+└──────┬──────┘
+       │
+       ├── pass ──► reporter
+       │
+       └── fail ──► iterating (back to implementer with feedback)
+                         │
+                         ▼
+                    implementer → reviewer → tester (repeat, max 3 cycles total)
+       │
+       ▼
+┌─────────────┐
+│  reporting   │  Reporter generates artifacts
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  packaging   │  Create PR with artifact-based summary
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  completed   │  PR created, awaiting human review
+└─────────────┘
+```
+
+**Key sequencing rules:**
+1. Roles execute strictly in order: implementer → reviewer → tester → reporter.
+2. The reviewer never sees the implementation in progress — only the finished diff.
+3. The tester only runs after the reviewer passes. No point testing code that fails review.
+4. The reporter only runs after both reviewer and tester pass. Artifacts reflect the final state.
+5. Iteration cycles always restart at the implementer and proceed forward through the gates again.
+
+### Iteration and Conflict Resolution
+
+**Iteration triggers:**
+- Reviewer returns `fail` → implementer receives the specific issues and fixes them, then the diff goes back to the reviewer.
+- Tester returns `fail` → implementer receives the specific failures and fixes them, then the full review → test cycle repeats.
+
+**Iteration budget:**
+- Maximum **3 iteration cycles** total across all gates combined. An iteration cycle is one round-trip from implementer back through the failing gate.
+- The counter is shared — 2 review failures + 1 test failure = 3 cycles = budget exhausted.
+
+**Conflict resolution:**
+- If the reviewer and implementer disagree on whether a finding is valid, the reviewer's judgment prevails. The reviewer is the independent check.
+- If the implementer believes a reviewer finding is incorrect, the implementer must address it anyway or escalate to the user. The implementer cannot override the reviewer.
+- If the tester reports a failure that the implementer believes is a pre-existing issue (not caused by this change), the implementer must document this claim with evidence (e.g., showing the same failure exists on main). The orchestrator then asks the user whether to proceed or stop.
+
+**Escalation to user:**
+- Ambiguous or contradictory acceptance criteria
+- Fundamental architectural conflict with the plan
+- Disagreement that cannot be resolved within the iteration budget
+- Pre-existing failures disputed between tester and implementer
+- Task determined to be unachievable as scoped
+
+### Failure Conditions
+
+The run transitions to `failed` immediately (no further iteration) when:
+
+1. **Iteration budget exhausted.** Three cycles completed without all gates passing.
+2. **Unmet dependencies discovered.** A required prior task has not been completed.
+3. **Unresolvable scope conflict.** The task requires changes that fundamentally conflict with the existing architecture or plan.
+4. **User-directed stop.** The user explicitly halts execution after an escalation.
+
+On failure, the orchestrator:
+- Stops all role activity
+- Writes a failure report to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md`
+- Does NOT create a PR
+- Reports to the user: what was attempted, what failed, why, and recommended next steps
