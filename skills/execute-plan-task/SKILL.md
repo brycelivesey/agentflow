@@ -1,4 +1,15 @@
+---
+name: execute-plan-task
+description: Use when executing a planned task from an agentflow plan. This skill runs one task at a time through a disciplined multi-agent workflow (implement, review, test, document) and creates a PR for human review. Triggers on phrases like "execute task", "run task", "start task", "implement task", "execute plan task", "work on task N".
+---
+
 # Execute Plan Task
+
+## Overview
+
+Execute exactly **one task** from an `.agentflow/plans/` plan file through an orchestrated multi-agent workflow. Each run takes a single task through implementation, independent review, testing, artifact generation, and PR creation. The skill enforces quality gates at every stage and produces human-reviewable artifacts alongside the code change.
+
+**Scope:** One task per invocation. To execute multiple tasks, invoke this skill once per task in dependency order.
 
 ## Execution Contract
 
