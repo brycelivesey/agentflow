@@ -471,3 +471,61 @@ The artifact directory name follows this pattern:
 - **Examples:**
   - Task "Define Execution Contract" → `2026-02-28-define-execution-contract/`
   - Task "Scaffold Skill and Trigger Metadata" → `2026-02-28-scaffold-skill-and-trigger-metadata/`
+
+## CI Integration (Deferred — v1)
+
+Continuous integration is intentionally **not included** in v1 of this skill. Repository CI configurations vary widely (GitHub Actions, CircleCI, Jenkins, Makefiles, custom scripts), and hardcoding assumptions would make the skill brittle across different projects.
+
+**What the tester does today (v1):**
+- Discovers and runs test commands available locally (package.json scripts, Makefile targets, test directories)
+- Reports exactly what was and wasn't verifiable
+- Documents gaps explicitly in the verification report
+
+**What CI integration will add (future):**
+- Trigger repo-specific CI pipelines after implementation
+- Wait for CI results before advancing through gates
+- Include CI output in the verification report and PR summary
+
+### CI Configuration Placeholder
+
+When CI integration is added, it will be driven by an optional config section in the plan file or a repo-level `.agentflow/ci.yml` file. The expected schema:
+
+```yaml
+# .agentflow/ci.yml (future — not yet implemented)
+# TODO: Define and implement CI integration
+
+ci:
+  # Command to run the full CI pipeline locally or trigger it remotely
+  run: ""
+  # Example values:
+  #   "npm test"
+  #   "make ci"
+  #   "gh workflow run ci.yml && gh run watch"
+
+  # How to check if CI passed (exit code 0 = pass)
+  check: ""
+  # Example values:
+  #   "npm test"
+  #   "gh run view --exit-status"
+
+  # Timeout in seconds before treating CI as failed
+  timeout: 600
+
+  # Whether CI must pass before PR creation (vs. advisory-only)
+  required: true
+```
+
+### Integration Points
+
+When implemented, CI hooks into the workflow at two points:
+
+1. **Post-tester, pre-reporter.** After local tests pass, trigger CI. If CI fails, enter `iterating` and send failures back to the implementer (counts against the iteration budget).
+
+2. **Post-packaging (advisory).** If `required: false`, CI runs after PR creation and results are added as a PR comment rather than blocking the workflow.
+
+### Until Then
+
+The tester role remains the sole validation stage. The verification report must explicitly state:
+- "CI integration is not configured for this repository."
+- What local validation was performed as a substitute.
+- Any test coverage gaps the human reviewer should be aware of.
