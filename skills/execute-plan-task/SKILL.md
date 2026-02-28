@@ -21,7 +21,7 @@ This section defines the inputs, outputs, statuses, and non-negotiable gates for
 |-------|--------|----------|-------------|
 | Plan file | `.agentflow/plans/<YYYY-MM-DD>-<feature-name>.md` | Yes | The plan containing the task to execute |
 | Task identifier | User specifies (e.g., "task 1", "Task 3: Encode Multi-Agent Role Workflow") | Yes | Which task within the plan to execute |
-| Working branch | Current branch or created from `main` | Yes | The branch where implementation happens |
+| Working branch | Current branch | Yes | The branch where implementation happens (user manages branch creation) |
 
 **Task resolution:** The skill reads the specified plan file, locates the task by number or name, and extracts:
 - Description
@@ -39,11 +39,13 @@ Every successful run produces:
 | Output | Location | Description |
 |--------|----------|-------------|
 | Implementation | Working branch commits | Code changes fulfilling the task |
-| ADR | `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/adr.md` | Architecture decision record for non-trivial choices made |
-| Implementation report | `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/implementation-report.md` | Summary of what was built, why, and how |
-| Architecture diagram | `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/architecture-diagram.txt` | Text-based diagram of affected components |
-| Verification report | `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/verification.md` | What was tested, how, and results |
-| Pull request | GitHub PR | PR with artifact-based summary, awaiting human review |
+| ADR | Local: `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/adr.md` | Architecture decision record for non-trivial choices made |
+| Implementation report | Local: `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/implementation-report.md` | Summary of what was built, why, and how |
+| Architecture diagram | Local: `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/architecture-diagram.txt` | Text-based diagram of affected components |
+| Verification report | Local: `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/verification.md` | What was tested, how, and results |
+| Pull request | GitHub PR | PR with full artifact content in the body, awaiting human review |
+
+**Artifact locality:** Artifact files are local working state only — they are NOT committed or pushed. Their content is assembled directly into the PR body at packaging time. The `.agentflow/artifacts/` directory is gitignored.
 
 ### Statuses
 
@@ -71,7 +73,7 @@ These gates **must** pass before a run can reach `completed`. There are no overr
 
 3. **No security vulnerabilities introduced.** The reviewer checks for OWASP top 10 and any context-specific security concerns. Any finding blocks completion.
 
-4. **Artifacts generated.** All four artifact files must exist and contain substantive content (not stubs or placeholders).
+4. **Artifacts generated.** All four artifact files must be generated locally and contain substantive content (not stubs or placeholders). Their content is assembled into the PR body.
 
 5. **Clean diff.** The change is scoped to the task — no unrelated modifications, no leftover debug code, no commented-out blocks.
 
@@ -478,22 +480,17 @@ Once all gates pass and artifacts are generated, the skill enters `packaging` st
 
 ### Branch Preparation
 
-1. **Branch naming.** If not already on a feature branch, create one from `main`:
-   ```
-   <task-slug>
-   ```
-   Example: `define-execution-contract`, `add-pr-creation-workflow`
+The skill assumes the user has already created a feature branch in their working clone. The skill does NOT create branches.
 
-2. **Commit the artifacts.** Stage and commit the artifact files (`.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/`) as a dedicated commit separate from implementation commits. Commit message format:
-   ```
-   docs: add execution artifacts for <task name>
-   ```
+1. **Verify branch.** Confirm the current branch is not `main`. If on `main`, stop and ask the user to create a feature branch first.
 
-3. **Push the branch.** Push to the remote with `-u` to set upstream tracking.
+2. **Push the branch.** Push to the remote with `-u` to set upstream tracking.
+
+**Note:** Artifact files are NOT committed. They remain local in `.agentflow/artifacts/` (gitignored). Their content is assembled into the PR body.
 
 ### PR Summary Generation
 
-The PR body is assembled from the artifacts, not written freehand. This ensures the summary reflects what was actually verified rather than what was intended.
+The PR body is assembled from the local artifact files, not written freehand. This ensures the summary reflects what was actually verified rather than what was intended. Artifact content is placed directly in the PR body — no artifact files are committed.
 
 **PR title format:**
 ```
@@ -511,25 +508,18 @@ Where `<type>` follows conventional commit types: `feat`, `fix`, `refactor`, `do
 ## Changes
 <Bulleted list from implementation-report.md Changes section. One bullet per file or logical group.>
 
+## Architecture
+<Content from architecture-diagram.txt, wrapped in a code block.>
+
 ## Decisions
-<If adr.md contains substantive decisions, list each decision title and its one-line summary. If no significant decisions, state: "No non-trivial architectural decisions were required.">
+<Full content from adr.md. If no significant decisions, state: "No non-trivial architectural decisions were required.">
 
 ## Verification
-<From verification.md: reviewer verdict, tester verdict, commands run, and any noted limitations.>
+<Full content from verification.md: reviewer verdict, tester verdict, commands run, iteration history, and any noted limitations.>
 
-## Artifacts
-The following artifacts are included in this PR for detailed review:
-- `<artifact-path>/adr.md` — Architecture decisions
-- `<artifact-path>/implementation-report.md` — Implementation details
-- `<artifact-path>/architecture-diagram.txt` — Component diagram
-- `<artifact-path>/verification.md` — Full verification record
-
-## Status
+---
 This PR was created automatically by the `execute-plan-task` skill.
-**Awaiting human review and merge approval.**
-
-Source plan: `<path to plan file>`
-Task: <task number and name>
+Source plan: `<path to plan file>` | Task: <task number and name>
 ```
 
 ### PR Creation
@@ -547,7 +537,7 @@ gh pr create \
 **Rules:**
 - The PR always targets `main` (trunk-based development).
 - No reviewers, labels, or assignees are set automatically — the human decides review routing.
-- If `gh pr create` fails (e.g., no remote, auth issue), the run transitions to `failed` with the error captured in a failure report. The implementation and artifacts are preserved on the branch.
+- If `gh pr create` fails (e.g., no remote, auth issue), the run transitions to `failed` with the error captured in a failure report. The implementation is preserved on the branch; artifacts remain local.
 
 ### Post-PR State
 
@@ -559,7 +549,7 @@ After the PR is created:
 
 ### PR for Failed Runs
 
-No PR is created when a run fails. The failure report at `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md` is the output. If the branch has partial work, it remains on the branch but is not submitted as a PR.
+No PR is created when a run fails. The failure report at `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md` remains local as a diagnostic record. If the branch has partial work, it remains on the branch but is not submitted as a PR.
 
 ## CI Integration (Deferred — v1)
 
