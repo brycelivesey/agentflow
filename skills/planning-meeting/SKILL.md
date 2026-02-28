@@ -126,26 +126,38 @@ case "$LAYER_VALUE" in
 esac
 
 awk '
-  BEGIN { count=0; none=0; valid=1 }
+  BEGIN { entry_count=0; none_count=0; valid=1; duplicate=0; invalid_line=0 }
   /^## Dependencies$/ { in_deps=1; next }
   /^## / { in_deps=0 }
   in_deps {
-    count++
-    if ($0 == "- none") {
-      none++
+    if ($0 ~ /^[[:space:]]*$/) {
       next
     }
-    if ($0 !~ /^- #[1-9][0-9]*$/) {
-      valid=0
+    if ($0 !~ /^- /) {
+      invalid_line=1
+      next
     }
+    entry_count++
+    if ($0 == "- none") {
+      none_count++
+      next
+    }
+    if ($0 ~ /^- #[1-9][0-9]*$/) {
+      dep_issue = substr($0, 4)
+      if (seen[dep_issue]++) {
+        duplicate=1
+      }
+      next
+    }
+    valid=0
   }
   END {
-    if (count == 0 || valid == 0 || (none > 0 && count != 1)) {
+    if (entry_count == 0 || invalid_line == 1 || valid == 0 || duplicate == 1 || (none_count > 0 && entry_count != 1)) {
       exit 1
     }
   }
 ' "$TASK_BODY_FILE" || {
-    echo "Schema error: dependencies must be '- none' or '- #<issue_number>' and '- none' must be exclusive"
+    echo "Schema error: dependencies must be unique bullet entries of '- none' or '- #<issue_number>' and '- none' must be exclusive"
     exit 1
   }
 
