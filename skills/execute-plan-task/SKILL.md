@@ -472,6 +472,95 @@ The artifact directory name follows this pattern:
   - Task "Define Execution Contract" → `2026-02-28-define-execution-contract/`
   - Task "Scaffold Skill and Trigger Metadata" → `2026-02-28-scaffold-skill-and-trigger-metadata/`
 
+## PR Creation Workflow
+
+Once all gates pass and artifacts are generated, the skill enters `packaging` status and creates a pull request automatically. The human reviews and merges — the skill does not merge.
+
+### Branch Preparation
+
+1. **Branch naming.** If not already on a feature branch, create one from `main`:
+   ```
+   <task-slug>
+   ```
+   Example: `define-execution-contract`, `add-pr-creation-workflow`
+
+2. **Commit the artifacts.** Stage and commit the artifact files (`.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/`) as a dedicated commit separate from implementation commits. Commit message format:
+   ```
+   docs: add execution artifacts for <task name>
+   ```
+
+3. **Push the branch.** Push to the remote with `-u` to set upstream tracking.
+
+### PR Summary Generation
+
+The PR body is assembled from the artifacts, not written freehand. This ensures the summary reflects what was actually verified rather than what was intended.
+
+**PR title format:**
+```
+<type>: <concise description from task name>
+```
+
+Where `<type>` follows conventional commit types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`. Derive the type from the task's layer and description.
+
+**PR body structure:**
+
+```markdown
+## Summary
+<2-4 sentences pulled from implementation-report.md Summary section.>
+
+## Changes
+<Bulleted list from implementation-report.md Changes section. One bullet per file or logical group.>
+
+## Decisions
+<If adr.md contains substantive decisions, list each decision title and its one-line summary. If no significant decisions, state: "No non-trivial architectural decisions were required.">
+
+## Verification
+<From verification.md: reviewer verdict, tester verdict, commands run, and any noted limitations.>
+
+## Artifacts
+The following artifacts are included in this PR for detailed review:
+- `<artifact-path>/adr.md` — Architecture decisions
+- `<artifact-path>/implementation-report.md` — Implementation details
+- `<artifact-path>/architecture-diagram.txt` — Component diagram
+- `<artifact-path>/verification.md` — Full verification record
+
+## Status
+This PR was created automatically by the `execute-plan-task` skill.
+**Awaiting human review and merge approval.**
+
+Source plan: `<path to plan file>`
+Task: <task number and name>
+```
+
+### PR Creation
+
+Create the PR using `gh pr create`:
+
+```bash
+gh pr create \
+  --title "<type>: <description>" \
+  --body "<assembled body>" \
+  --base main \
+  --head <branch-name>
+```
+
+**Rules:**
+- The PR always targets `main` (trunk-based development).
+- No reviewers, labels, or assignees are set automatically — the human decides review routing.
+- If `gh pr create` fails (e.g., no remote, auth issue), the run transitions to `failed` with the error captured in a failure report. The implementation and artifacts are preserved on the branch.
+
+### Post-PR State
+
+After the PR is created:
+- The run transitions to `completed`.
+- The PR URL is reported to the user.
+- The skill's job is done. Merging, requesting reviews, and responding to PR feedback are human responsibilities.
+- If the human requests changes during PR review, they invoke this skill again or make changes manually — the skill does not watch for PR comments.
+
+### PR for Failed Runs
+
+No PR is created when a run fails. The failure report at `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md` is the output. If the branch has partial work, it remains on the branch but is not submitted as a PR.
+
 ## CI Integration (Deferred — v1)
 
 Continuous integration is intentionally **not included** in v1 of this skill. Repository CI configurations vary widely (GitHub Actions, CircleCI, Jenkins, Makefiles, custom scripts), and hardcoding assumptions would make the skill brittle across different projects.
