@@ -1,0 +1,17 @@
+[NEW] README.md
+    ├── documents ──► install.sh
+    ├── documents ──► skills/planning-meeting/
+    ├── documents ──► skills/execute-plan-task/
+    └── documents ──► templates/plan-output.md
+
+install.sh
+    ├── symlinks ──► ~/.claude/skills/{planning-meeting,execute-plan-task}
+    └── symlinks ──► ~/.agents/skills/{planning-meeting,execute-plan-task}
+
+skills/planning-meeting/SKILL.md
+    └── outputs to ──► <project>/.agentflow/plans/*.md
+
+skills/execute-plan-task/SKILL.md
+    ├── reads from ──► <project>/.agentflow/plans/*.md
+    ├── writes to ──► <project>/.agentflow/artifacts/<date>-<slug>/
+    └── triggers ──► gh pr create
