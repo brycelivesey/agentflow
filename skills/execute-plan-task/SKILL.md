@@ -302,3 +302,172 @@ On failure, the orchestrator:
 - Writes a failure report to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/failure-report.md`
 - Does NOT create a PR
 - Reports to the user: what was attempted, what failed, why, and recommended next steps
+
+## Artifact Specifications
+
+All artifacts are written to `.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/` where the date is the execution date and the task slug is derived from the task name (lowercase, hyphens, no special characters). Artifacts are the primary mechanism for human reviewers to understand what happened without reading every line of code or diff.
+
+**Quality bar:** Every artifact must contain substantive content specific to the task. Stubs, placeholders, boilerplate-only files, or "N/A" sections fail the artifact gate. If a section genuinely does not apply, state why in one sentence.
+
+### `adr.md` — Architecture Decision Record
+
+Documents non-trivial technical decisions made during implementation. Uses a structured format so decisions are discoverable and reviewable over time.
+
+```markdown
+# ADR: <concise decision title>
+
+## Status
+Accepted
+
+## Context
+<What problem or question arose during implementation? What constraints
+applied? Reference the task and plan for background.>
+
+## Decision
+<What was decided and why. Be specific — name the pattern, library,
+approach, or tradeoff chosen.>
+
+## Alternatives Considered
+<List alternatives that were evaluated. For each, one sentence on why
+it was not chosen.>
+
+## Consequences
+<What this decision enables, what it constrains, and any follow-up
+work it creates.>
+```
+
+**Multiple decisions:** If the task required multiple non-trivial decisions, include multiple ADR blocks in the same file, each with its own title.
+
+**No significant decisions:** If the implementation was straightforward with no meaningful design choices, write a single brief ADR stating: what the task was, that the implementation followed existing patterns with no new decisions required, and reference which existing patterns were followed.
+
+### `implementation-report.md` — Implementation Report
+
+Summarizes what was built so a reviewer can understand the change at a high level before (or instead of) reading the full diff.
+
+```markdown
+# Implementation Report: <task name>
+
+## Summary
+<2-4 sentences: what was built and why, in plain language.>
+
+## Changes
+
+### <file or component name>
+- <What changed and why>
+
+### <file or component name>
+- <What changed and why>
+
+<Repeat for each file or logical group of changes.>
+
+## How It Works
+<Explain the runtime behavior or integration of the change. How does a
+user or system interact with what was built? Keep this concrete.>
+
+## Scope and Boundaries
+- **In scope:** <what this change covers>
+- **Out of scope:** <what this change intentionally does not cover>
+- **Assumptions:** <any assumptions the implementation relies on>
+```
+
+**Granularity:** Group changes by logical component, not by individual line edits. A reviewer should finish this file knowing *what changed at a system level* and *why each change was necessary*.
+
+### `architecture-diagram.txt` — Architecture Diagram
+
+A text-based diagram showing how the changed components relate to each other and to the broader system. This file uses plain ASCII or Unicode box-drawing characters so it renders correctly everywhere.
+
+**Requirements:**
+- Show the components that were added or modified by this task
+- Show how they connect to existing components they interact with
+- Label relationships (e.g., "reads from", "calls", "extends", "imports")
+- Mark new or modified components distinctly (e.g., prefix with `[NEW]` or `[MODIFIED]`)
+- Keep it focused on the task scope — this is not a full system architecture diagram
+
+**Example structure:**
+```
+[NEW] skills/execute-plan-task/SKILL.md
+    ├── reads from ──► .agentflow/plans/*.md
+    ├── writes to ──► .agentflow/artifacts/<date>-<slug>/
+    └── triggers ──► gh pr create
+
+[MODIFIED] install.sh
+    └── symlinks ──► skills/execute-plan-task/
+```
+
+**Diagram scope:** If the task only touches a single file with no cross-component interaction, the diagram should still show that file's role in the broader system context — where it sits, what reads it, what it affects.
+
+### `verification.md` — Verification Report
+
+Consolidates everything that was checked and tested, providing an auditable record of quality verification.
+
+```markdown
+# Verification Report: <task name>
+
+## Review Summary
+- **Verdict:** <pass/fail>
+- **Reviewer findings:** <summary of what the reviewer checked and confirmed>
+- **Acceptance criteria verification:**
+  - [ ] <criterion 1> — <how it was verified>
+  - [ ] <criterion 2> — <how it was verified>
+
+## Test Summary
+- **Verdict:** <pass/fail>
+- **Commands executed:**
+  - `<command>` — <result (pass/fail, exit code)>
+  - `<command>` — <result>
+- **Coverage notes:** <what was and wasn't testable>
+
+## Security Check
+- <What was checked and the result. Reference specific concerns if any were found and resolved.>
+
+## Iteration History
+<If iterations occurred, document each cycle:>
+- **Cycle N:** <what failed, what was fixed, outcome of re-review/re-test>
+
+<If no iterations occurred:>
+- No iterations required. All gates passed on first cycle.
+
+## Limitations
+<Anything that could not be verified and why. E.g., "No integration test suite exists; verification was limited to static review and syntax checks.">
+```
+
+**Honesty over completeness:** If something could not be tested or verified, say so. A verification report that claims full coverage when the repo has no tests is worse than one that explicitly states its limitations.
+
+### `failure-report.md` — Failure Report (failure runs only)
+
+Written only when a run transitions to `failed` status. This is not produced by the reporter role — it is written by the orchestrator directly.
+
+```markdown
+# Failure Report: <task name>
+
+## Failure Reason
+<One sentence: why the run failed.>
+
+## What Was Attempted
+<Summary of implementation work completed before failure.>
+
+## Iteration History
+- **Cycle N:** <what was tried, what failed, feedback given>
+
+## Root Cause Analysis
+<Why the failure occurred. Distinguish between: task scoping issues,
+implementation difficulty, pre-existing problems, or ambiguous requirements.>
+
+## Recommended Next Steps
+<Actionable suggestions: re-scope the task, fix a dependency, clarify
+requirements, or re-plan.>
+```
+
+### Artifact Naming Convention
+
+The artifact directory name follows this pattern:
+
+```
+.agentflow/artifacts/<YYYY-MM-DD>-<task-slug>/
+```
+
+- **Date:** The date execution started (not when the PR is created)
+- **Task slug:** Derived from the task name by: lowercasing, replacing spaces with hyphens, removing special characters, and truncating to 50 characters
+- **Examples:**
+  - Task "Define Execution Contract" → `2026-02-28-define-execution-contract/`
+  - Task "Scaffold Skill and Trigger Metadata" → `2026-02-28-scaffold-skill-and-trigger-metadata/`
