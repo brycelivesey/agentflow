@@ -2,29 +2,67 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_DIR="$SCRIPT_DIR/skills/planning-meeting"
+SKILLS_SRC="$SCRIPT_DIR/skills"
 
-# Claude Code: ~/.claude/skills/
+SKILLS=(
+    planning-meeting
+    execute-plan-task
+)
+
+# Target directories
 CLAUDE_SKILLS="$HOME/.claude/skills"
-mkdir -p "$CLAUDE_SKILLS"
-
-if [ -L "$CLAUDE_SKILLS/planning-meeting" ]; then
-    rm "$CLAUDE_SKILLS/planning-meeting"
-fi
-ln -s "$SKILL_DIR" "$CLAUDE_SKILLS/planning-meeting"
-echo "Installed to Claude Code: $CLAUDE_SKILLS/planning-meeting -> $SKILL_DIR"
-
-# Codex: ~/.agents/skills/
 AGENTS_SKILLS="$HOME/.agents/skills"
-mkdir -p "$AGENTS_SKILLS"
+mkdir -p "$CLAUDE_SKILLS" "$AGENTS_SKILLS"
 
-if [ -L "$AGENTS_SKILLS/planning-meeting" ]; then
-    rm "$AGENTS_SKILLS/planning-meeting"
+# Validate skills before installing
+errors=0
+for skill in "${SKILLS[@]}"; do
+    skill_dir="$SKILLS_SRC/$skill"
+    if [ ! -d "$skill_dir" ]; then
+        echo "ERROR: Skill directory not found: $skill_dir"
+        errors=$((errors + 1))
+        continue
+    fi
+    if [ ! -f "$skill_dir/SKILL.md" ]; then
+        echo "ERROR: SKILL.md not found in $skill_dir"
+        errors=$((errors + 1))
+        continue
+    fi
+    # Verify frontmatter has name field
+    if ! head -5 "$skill_dir/SKILL.md" | grep -q "^name:"; then
+        echo "ERROR: SKILL.md in $skill missing 'name:' frontmatter"
+        errors=$((errors + 1))
+    fi
+done
+
+if [ "$errors" -gt 0 ]; then
+    echo ""
+    echo "Validation failed with $errors error(s). Aborting install."
+    exit 1
 fi
-ln -s "$SKILL_DIR" "$AGENTS_SKILLS/planning-meeting"
-echo "Installed to Codex: $AGENTS_SKILLS/planning-meeting -> $SKILL_DIR"
+
+# Install each skill
+for skill in "${SKILLS[@]}"; do
+    skill_dir="$SKILLS_SRC/$skill"
+
+    # Claude Code
+    if [ -L "$CLAUDE_SKILLS/$skill" ]; then
+        rm "$CLAUDE_SKILLS/$skill"
+    fi
+    ln -s "$skill_dir" "$CLAUDE_SKILLS/$skill"
+    echo "Installed to Claude Code: $CLAUDE_SKILLS/$skill -> $skill_dir"
+
+    # Codex
+    if [ -L "$AGENTS_SKILLS/$skill" ]; then
+        rm "$AGENTS_SKILLS/$skill"
+    fi
+    ln -s "$skill_dir" "$AGENTS_SKILLS/$skill"
+    echo "Installed to Codex: $AGENTS_SKILLS/$skill -> $skill_dir"
+done
 
 echo ""
-echo "Done! The planning-meeting skill is now available:"
-echo "  Claude Code: /planning-meeting"
-echo "  Codex:       \$planning-meeting"
+echo "Done! ${#SKILLS[@]} skills installed:"
+for skill in "${SKILLS[@]}"; do
+    echo "  Claude Code: /$skill"
+    echo "  Codex:       \$$skill"
+done
