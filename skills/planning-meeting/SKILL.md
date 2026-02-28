@@ -1,13 +1,18 @@
 ---
 name: planning-meeting
-description: Use when starting feature work, planning a new feature, or beginning a user story. This skill guides a collaborative planning conversation that produces small, stacked tasks for trunk-based development. Triggers on phrases like "plan a feature", "planning meeting", "let's plan", "new feature", "user story", "break this into tasks".
+description: Use when starting feature work, planning a new feature, or beginning a user story. This skill guides a collaborative planning conversation that produces small, stacked GitHub Issues for trunk-based development. Triggers on phrases like "plan a feature", "planning meeting", "let's plan", "new feature", "user story", "break this into tasks".
 ---
 
 # Planning Meeting
 
 ## Overview
 
-Conduct a collaborative planning meeting to break a feature into small, stacked tasks suitable for trunk-based development. Inspired by Facebook's engineering culture: small diffs, one idea per change, reviewable in ~15 minutes.
+Conduct a collaborative planning meeting to break a feature into small, stacked tasks suitable for trunk-based development. Operational output is GitHub Issues only. Do not write task plans to markdown files.
+
+This workflow is issue-only and executable:
+- Every task must be created as a GitHub Issue using `gh issue create`.
+- Every issue body must follow the single-task schema in `templates/github-issue-task.md`.
+- If any GitHub operation or schema validation fails, stop and report the error. No fallback path exists.
 
 ## Process
 
@@ -21,7 +26,7 @@ Before asking the user any questions, explore the codebase thoroughly:
 
 - Read relevant source files, configs, and existing architecture
 - Check for existing patterns, conventions, and prior implementations of similar features
-- Look at recent commits and any existing plans in `.agentflow/plans/`
+- Look at recent commits and existing related GitHub Issues/PRs
 - Identify the components, modules, and files that will likely be affected
 - Form your own understanding of constraints, dependencies, and risks
 
@@ -58,56 +63,193 @@ Decompose the agreed approach into stacked tasks following these principles:
 - **Layer-based when appropriate** - consider stacking: data model -> API -> UI -> tests
 - **No hard line count** - size by cohesion, not by counting lines
 
-### Phase 6: Output Plan
+### Phase 6: Create GitHub Issues (Required)
 
-Write the plan using the template below. Present it to the user for review. After approval, write it to the target project at:
+Convert each planned task into one executable GitHub Issue. GitHub Issues are the canonical task tracker and the only operational output.
 
+#### 6.1 Preflight checks (required)
+
+Run and require success:
+
+```bash
+gh auth status
+gh repo view --json nameWithOwner
 ```
-<project-root>/.agentflow/plans/YYYY-MM-DD-<feature-name>.md
+
+If either command fails (auth, network, permissions, repo context), stop and report the error.
+
+#### 6.2 Enforce task schema (required)
+
+For every task issue body, use the exact section structure from:
+
+- `templates/github-issue-task.md`
+
+Required sections in order:
+
+1. `## Description`
+2. `## Acceptance Criteria`
+3. `## Dependencies`
+4. `## Layer`
+5. `## File Hints`
+6. `## Status Labels`
+
+Validation rules:
+
+- `## Dependencies` entries must be exactly `- none` or `- #<issue_number>` per `templates/github-issue-task.md`.
+- `## Layer` must be exactly one of `data|api|ui|test|infra`.
+- `## Status Labels` must contain `- status:todo`.
+- One issue body represents exactly one executable task.
+
+Executable validation pattern (required before any create/edit call):
+
+```bash
+for header in \
+  "## Description" \
+  "## Acceptance Criteria" \
+  "## Dependencies" \
+  "## Layer" \
+  "## File Hints" \
+  "## Status Labels"; do
+  rg -q "^${header}$" "$TASK_BODY_FILE" || {
+    echo "Schema error: missing ${header}"
+    exit 1
+  }
+done
+
+LAYER_VALUE="$(awk '/^## Layer$/{getline; print; exit}' "$TASK_BODY_FILE")"
+case "$LAYER_VALUE" in
+  data|api|ui|test|infra) ;;
+  *)
+    echo "Schema error: invalid layer '${LAYER_VALUE}'"
+    exit 1
+    ;;
+esac
+
+awk '
+  BEGIN { count=0; none=0; valid=1 }
+  /^## Dependencies$/ { in_deps=1; next }
+  /^## / { in_deps=0 }
+  in_deps {
+    count++
+    if ($0 == "- none") {
+      none++
+      next
+    }
+    if ($0 !~ /^- #[1-9][0-9]*$/) {
+      valid=0
+    }
+  }
+  END {
+    if (count == 0 || valid == 0 || (none > 0 && count != 1)) {
+      exit 1
+    }
+  }
+' "$TASK_BODY_FILE" || {
+    echo "Schema error: dependencies must be '- none' or '- #<issue_number>' and '- none' must be exclusive"
+    exit 1
+  }
+
+STATUS_COUNT="$(awk '/^## Status Labels$/{flag=1;next}/^## /{flag=0}flag' "$TASK_BODY_FILE" | rg -c '^- ')"
+if [ "$STATUS_COUNT" -ne 1 ] || ! awk '/^## Status Labels$/{flag=1;next}/^## /{flag=0}flag' "$TASK_BODY_FILE" | rg -q '^- status:todo$'; then
+  echo "Schema error: status labels block must contain exactly one entry: '- status:todo'"
+  exit 1
+fi
 ```
 
-Create the `.agentflow/plans/` directory if it doesn't exist.
-Keep plans as local working artifacts by default (typically gitignored).
-Only commit a plan file when the user explicitly asks to version it.
+If schema validation fails, stop and report the error. Do not create or update issues until schema is valid.
 
-## Plan Output Template
+#### 6.3 Create issues with executable commands
 
-Use this structure for the final plan document:
+Create issues in dependency order so dependency references can use already-created issue numbers.
 
+Reusable command pattern (required):
+
+```bash
+TASK_TITLE="Task N: <short task title>"
+TASK_BODY_FILE="$(mktemp)"
+
+cat > "$TASK_BODY_FILE" <<'EOF'
+## Description
+<1-3 sentences describing the task outcome and scope>
+
+## Acceptance Criteria
+- [ ] <observable outcome 1>
+- [ ] <observable outcome 2>
+
+## Dependencies
+- none
+
+## Layer
+api
+
+## File Hints
+- path/to/file.ext
+
+## Status Labels
+- status:todo
+EOF
+
+ISSUE_URL="$(gh issue create \
+  --title "$TASK_TITLE" \
+  --body-file "$TASK_BODY_FILE" \
+  --label "status:todo")" || {
+  echo "Issue creation failed for '${TASK_TITLE}'"
+  exit 1
+}
+ISSUE_NUMBER="${ISSUE_URL##*/}"
+echo "Created $ISSUE_URL"
 ```
-# [Feature Name]
 
-## User Story
-[What the user wants, in their words]
+For tasks with dependencies, replace `- none` with one line per dependency:
 
-## Context
-[What was learned from exploring the codebase - relevant files, existing patterns, constraints discovered]
-
-## Discussion Summary
-[Key points from the planning conversation - decisions made, questions raised and answered, concerns addressed]
-
-## Approach
-[The agreed technical approach and why it was chosen]
-
-### Alternatives Considered
-[Other approaches discussed and why they weren't chosen]
-
-## Tasks
-
-### Task 1: [Name]
-- **Description:** What this task accomplishes
-- **Acceptance Criteria:** How we know it's done
-- **Dependencies:** What must land before this
-- **Files likely affected:** [list]
-- **Layer:** data / api / ui / test / infra
-
-### Task 2: [Name]
-...
-(continue for all tasks)
-
-## Open Questions
-[Anything unresolved that might come up during implementation]
+```md
+## Dependencies
+- #123
+- #124
 ```
+
+If a task must be updated after creation (for example, correcting dependency references), use:
+
+```bash
+ISSUE_NUMBER_TO_EDIT="<issue_number>"
+gh issue edit "$ISSUE_NUMBER_TO_EDIT" --body-file "$TASK_BODY_FILE" || {
+  echo "Issue update failed for #${ISSUE_NUMBER_TO_EDIT}"
+  exit 1
+}
+```
+
+Every `gh issue create` and `gh issue edit` command must succeed. On any failure, stop immediately and report the exact command and error.
+
+#### 6.4 Confirm output to user
+
+Return the created issue list in dependency order:
+
+- `Task N -> #<issue_number> <issue_url>`
+
+Do not write `.agentflow/plans/` files. Do not provide markdown-plan fallback output.
+
+## Issue Body Contract
+
+Use `templates/github-issue-task.md` as the canonical body contract for each task issue.
+
+## Failure Policy (No Fallback)
+
+Stop immediately and report failure when any of the following occurs:
+
+- `gh auth status` fails
+- `gh repo view` fails
+- `gh issue create` fails
+- `gh issue edit` fails
+- Issue body fails schema validation from `templates/github-issue-task.md`
+- Required status label application fails
+
+Failure report must include:
+
+- The command that failed
+- The error category (auth/network/permissions/schema/other)
+- Suggested corrective action
+
+No markdown-plan fallback is allowed.
 
 ## Key Principles
 
@@ -116,4 +258,4 @@ Use this structure for the final plan document:
 - Natural conversation. This is a collaborative discussion, not a form to fill out.
 - One idea per diff. Every task should be a single, coherent change.
 - Trunk-based development. Small changes that land on main frequently.
-- Plans live in `.agentflow/plans/` as working state unless the user requests versioning.
+- GitHub Issues are the only task-tracking output for planning.
