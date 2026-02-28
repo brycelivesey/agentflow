@@ -60,13 +60,15 @@ Decompose the agreed approach into stacked tasks following these principles:
 
 ### Phase 6: Output Plan
 
-Write the plan using the template below. Present it to the user for review. After approval, commit it to the target project at:
+Write the plan using the template below. Present it to the user for review. After approval, write it to the target project at:
 
 ```
 <project-root>/.agentflow/plans/YYYY-MM-DD-<feature-name>.md
 ```
 
 Create the `.agentflow/plans/` directory if it doesn't exist.
+Keep plans as local working artifacts by default (typically gitignored).
+Only commit a plan file when the user explicitly asks to version it.
 
 ## Plan Output Template
 
@@ -114,3 +116,4 @@ Use this structure for the final plan document:
 - Natural conversation. This is a collaborative discussion, not a form to fill out.
 - One idea per diff. Every task should be a single, coherent change.
 - Trunk-based development. Small changes that land on main frequently.
+- Plans live in `.agentflow/plans/` as working state unless the user requests versioning.
