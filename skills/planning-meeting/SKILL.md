@@ -84,7 +84,7 @@ For every task issue body, use the exact section structure from:
 
 - `templates/github-issue-task.md`
 
-Required sections in order:
+Required sections (canonical order shown):
 
 1. `## Description`
 2. `## Acceptance Criteria`
@@ -97,7 +97,8 @@ Validation rules:
 
 - `## Dependencies` entries must be exactly `- none` or `- #<issue_number>` per `templates/github-issue-task.md`.
 - `## Layer` must be exactly one of `data|api|ui|test|infra`.
-- `## Status Labels` must contain `- status:todo`.
+- `## Status Labels` must contain exactly one of `- status:todo`, `- status:in-progress`, or `- status:done`.
+- For newly created issues in this phase, initialize `## Status Labels` as `- status:todo`.
 - One issue body represents exactly one executable task.
 
 Executable validation pattern (required before any create/edit call):
@@ -162,8 +163,8 @@ awk '
   }
 
 STATUS_COUNT="$(awk '/^## Status Labels$/{flag=1;next}/^## /{flag=0}flag' "$TASK_BODY_FILE" | rg -c '^- ')"
-if [ "$STATUS_COUNT" -ne 1 ] || ! awk '/^## Status Labels$/{flag=1;next}/^## /{flag=0}flag' "$TASK_BODY_FILE" | rg -q '^- status:todo$'; then
-  echo "Schema error: status labels block must contain exactly one entry: '- status:todo'"
+if [ "$STATUS_COUNT" -ne 1 ] || ! awk '/^## Status Labels$/{flag=1;next}/^## /{flag=0}flag' "$TASK_BODY_FILE" | rg -q '^- status:(todo|in-progress|done)$'; then
+  echo "Schema error: status labels block must contain exactly one entry with a single allowed value: '- status:todo', '- status:in-progress', or '- status:done'"
   exit 1
 fi
 ```

@@ -164,12 +164,17 @@ This skill uses four specialized roles executed sequentially within a single orc
 - Check for security vulnerabilities (OWASP top 10, context-specific concerns)
 - Verify the diff is clean — no debug code, no commented-out blocks, no unrelated changes
 - Verify code follows repository conventions and patterns
+- Execute review in two explicit passes:
+  - **Pass 1 (behavioral):** acceptance criteria, regressions, security, and clean diff scope.
+  - **Pass 2 (contract/parity):** cross-file consistency with referenced canonical contracts, and alignment between normative wording (for example, "must", "required", "in order") and what documented commands/validation actually enforce.
+- For contract-touching changes (for example `skills/`, `templates/`, `README` workflow rules), verify create/edit lifecycle semantics are coherent end-to-end rather than checking only one happy path.
 - Produce a clear verdict: **pass** or **fail with specific issues**
 
 **Outputs:**
 - Review verdict: `pass` or `fail`
 - If `fail`: a list of specific, actionable issues, each referencing the file and concern
 - If `pass`: confirmation of which acceptance criteria were verified and how
+- If `pass` with caveats: include an explicit `accepted-with-notes` list with rationale so no material concern is silently waived
 
 **Boundaries:**
 - Does NOT write or modify code
@@ -190,6 +195,7 @@ This skill uses four specialized roles executed sequentially within a single orc
 - Discover available test commands (look for `package.json` scripts, `Makefile` targets, test directories, CI config)
 - Run relevant test suites — prioritize tests related to the changed code
 - If no formal test commands exist, perform manual verification where possible (e.g., syntax checks, dry runs, build commands)
+- For contract/validator documentation changes, run a lightweight behavior matrix when feasible: one valid create-case sample, one valid edit-case sample, and one intentionally invalid sample that must fail.
 - Report exactly what was run and what the results were
 - Produce a clear verdict: **pass** or **fail with specific failures**
 
@@ -288,16 +294,19 @@ This skill uses four specialized roles executed sequentially within a single orc
 4. The reporter only runs after both reviewer and tester pass. Artifacts reflect the final state.
 5. Iteration cycles always restart at the implementer and proceed forward through the gates again.
 6. Team mode is out of scope for this skill. Use sequential role threads only.
+7. `packaging` includes immediate PR comment triage; do not transition to `completed` while unresolved correctness comments exist.
 
 ### Iteration and Conflict Resolution
 
 **Iteration triggers:**
 - Reviewer returns `fail` → implementer receives the specific issues and fixes them, then the diff goes back to the reviewer.
 - Tester returns `fail` → implementer receives the specific failures and fixes them, then the full review → test cycle repeats.
+- Post-PR comment triage finds an unaddressed correctness/security/contract concern from human or bot review → return to implementer with the finding, then repeat reviewer → tester gates.
 
 **Iteration budget:**
 - Maximum **3 iteration cycles** total across all gates combined. An iteration cycle is one round-trip from implementer back through the failing gate.
 - The counter is shared — 2 review failures + 1 test failure = 3 cycles = budget exhausted.
+- Post-PR comment-triage rework counts against the same shared iteration budget.
 
 **Conflict resolution:**
 - If the reviewer and implementer disagree on whether a finding is valid, the reviewer's judgment prevails. The reviewer is the independent check.
@@ -560,13 +569,30 @@ gh pr create \
 - No reviewers, labels, or assignees are set automatically — the human decides review routing.
 - If `gh pr create` fails (e.g., no remote, auth issue), the run transitions to `failed` with the error captured in a failure report. The implementation is preserved on the branch; artifacts remain local.
 
+### PR Comment Triage (Required)
+
+Immediately after PR creation, query review feedback and classify findings before marking the run complete.
+
+Minimum checks:
+
+```bash
+gh pr view <pr-number> --comments
+gh api repos/<owner>/<repo>/pulls/<pr-number>/reviews
+gh api repos/<owner>/<repo>/pulls/<pr-number>/comments
+```
+
+Triage rules:
+- If a comment reports a correctness, security, or contract-consistency issue that is not already addressed in the branch, return to `iterating`.
+- For each reviewed comment, record disposition in verification artifacts: `fixed`, `accepted-with-notes`, or `rejected` with rationale.
+- Do not mark the run `completed` while unresolved blocking comments remain.
+
 ### Post-PR State
 
 After the PR is created:
-- The run transitions to `completed`.
+- The run transitions to `completed` only after PR comment triage passes with no unresolved blocking concerns.
 - The PR URL is reported to the user.
 - The skill's job is done. Merging, requesting reviews, and responding to PR feedback are human responsibilities.
-- If the human requests changes during PR review, they invoke this skill again or make changes manually — the skill does not watch for PR comments.
+- If the human requests changes during PR review after completion, they invoke this skill again or make changes manually.
 
 ### PR for Failed Runs
 
