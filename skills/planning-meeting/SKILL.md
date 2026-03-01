@@ -109,6 +109,66 @@ Use this structure for the final plan document:
 [Anything unresolved that might come up during implementation]
 ```
 
+## GitHub Issue Creation
+
+After the plan is approved, create one GitHub Issue per task using the template at `templates/github-issue-task.md`. Each issue body must include these required sections:
+
+- `## Description`
+- `## Acceptance Criteria`
+- `## Dependencies`
+- `## Layer`
+- `## File Hints`
+- `## Status Labels`
+
+### Schema Validation
+
+After creating each issue, validate its body against the schema. The following snippet can be piped the raw issue body (e.g., from `gh issue view <N> --json body -q .body`):
+
+```bash
+awk '
+  /^## Description/        { has_desc = 1 }
+  /^## Acceptance Criteria/ { has_ac = 1 }
+  /^## File Hints/          { has_fh = 1 }
+
+  /^## Layer/        { in_layer = 1; next }
+  in_layer && /^## / { in_layer = 0 }
+  in_layer && /^[[:space:]]*$/ { next }
+  in_layer && /^data[[:space:]]*$/  { has_layer = 1; in_layer = 0 }
+  in_layer && /^api[[:space:]]*$/   { has_layer = 1; in_layer = 0 }
+  in_layer && /^ui[[:space:]]*$/    { has_layer = 1; in_layer = 0 }
+  in_layer && /^test[[:space:]]*$/  { has_layer = 1; in_layer = 0 }
+  in_layer && /^infra[[:space:]]*$/ { has_layer = 1; in_layer = 0 }
+
+  /^## Dependencies/        { in_deps = 1; next }
+  in_deps && /^## /         { in_deps = 0 }
+  in_deps && /^[[:space:]]*$/ { next }
+  in_deps && /^- none[[:space:]]*$/    { has_deps = 1 }
+  in_deps && /^- #[0-9]+[[:space:]]*$/ { has_deps = 1 }
+
+  /^## Status Labels/        { in_status = 1; status_count = 0; next }
+  in_status && /^## /        { in_status = 0 }
+  in_status && /^[[:space:]]*$/ { next }
+  in_status && /^- status:todo[[:space:]]*$/        { status_count++; has_status = 1 }
+  in_status && /^- status:in-progress[[:space:]]*$/ { status_count++; has_status = 1 }
+  in_status && /^- status:done[[:space:]]*$/        { status_count++; has_status = 1 }
+
+  END {
+    ok = 1
+    if (has_desc == 0)   { print "FAIL: missing ## Description";            ok = 0 }
+    if (has_ac == 0)     { print "FAIL: missing ## Acceptance Criteria";     ok = 0 }
+    if (has_fh == 0)     { print "FAIL: missing ## File Hints";              ok = 0 }
+    if (has_layer == 0)  { print "FAIL: missing or invalid ## Layer";        ok = 0 }
+    if (has_deps == 0)   { print "FAIL: missing or invalid ## Dependencies"; ok = 0 }
+    if (has_status == 0) { print "FAIL: missing ## Status Labels";           ok = 0 }
+    if (status_count > 1) { print "FAIL: multiple status labels";            ok = 0 }
+    if (ok) print "PASS"
+    exit (ok == 0)
+  }
+'
+```
+
+**Whitespace handling:** The snippet skips blank lines between section headers and their values, so normal markdown spacing (e.g., a blank line after `## Layer`) does not cause false failures.
+
 ## Key Principles
 
 - Research first, ask second. Explore the codebase before asking the user questions.
