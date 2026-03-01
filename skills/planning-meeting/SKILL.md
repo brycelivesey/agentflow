@@ -15,9 +15,29 @@ Conduct a collaborative planning meeting to break a feature into small, stacked 
 
 The user describes the feature or user story they want to build. Listen and understand before doing anything else.
 
-### Phase 2: Research
+### Phase 2: Confirm Scope
 
-Before asking the user any questions, explore the codebase thoroughly:
+Before any deep research, play back your understanding of the feature scope and get explicit confirmation:
+
+- Summarize what you heard: the feature goal, the boundaries of the change, and what is explicitly out of scope.
+- Ask the user to confirm or correct your understanding.
+- Do not proceed to research until the user agrees on scope.
+
+This prevents the agent from investigating unrelated parts of the codebase or expanding the feature beyond what the user intended.
+
+**Example:**
+
+> **Agent:** "So the scope is: add a retry mechanism to the API client for transient network errors. Out of scope: changing the authentication flow or adding circuit-breaker logic. Is that right?"
+>
+> **User:** "Yes, that's right."
+
+> **Agent:** "It sounds like you want to refactor the entire API layer."
+>
+> **User:** "No, just the retry logic for transient errors. Auth and circuit-breaker are out of scope."
+
+### Phase 3: Research
+
+Before asking the user any questions, explore the codebase thoroughly — but only within the confirmed scope:
 
 - Read relevant source files, configs, and existing architecture
 - Check for existing patterns, conventions, and prior implementations of similar features
@@ -25,9 +45,11 @@ Before asking the user any questions, explore the codebase thoroughly:
 - Identify the components, modules, and files that will likely be affected
 - Form your own understanding of constraints, dependencies, and risks
 
+Stay within the boundaries confirmed in Phase 2. If research reveals something potentially relevant but outside the agreed scope, flag it briefly to the user rather than investigating it.
+
 The goal is to answer as many of your own questions as possible from the code. Only ask the user things you genuinely cannot determine from the codebase.
 
-### Phase 3: Clarify
+### Phase 4: Clarify
 
 Ask the user clarifying questions. Consider these perspectives, but let the context determine which questions matter:
 
@@ -36,9 +58,9 @@ Ask the user clarifying questions. Consider these perspectives, but let the cont
 - **Engineering:** What's the complexity? What are the risky parts? What could go wrong? What are the performance implications?
 - **Testing/QA:** How do we verify this works? What are the edge cases? What's the test strategy?
 
-Ask questions naturally. There is no limit on the number of questions. Thoroughness matters more than speed. Research the codebase between questions if new information changes what you need to ask.
+Ask questions naturally, but keep them within the confirmed scope. There is no limit on the number of questions. Thoroughness matters more than speed. Research the codebase between questions if new information changes what you need to ask.
 
-### Phase 4: Discuss Approach
+### Phase 5: Discuss Approach
 
 Share your recommended technical approach and why you think it's best. Also present alternatives worth considering. This is a back-and-forth conversation:
 
@@ -47,7 +69,7 @@ Share your recommended technical approach and why you think it's best. Also pres
 - Go back and forth until you both agree on an approach
 - Don't force a fixed number of options - present what's relevant
 
-### Phase 5: Break Into Tasks
+### Phase 6: Break Into Tasks
 
 Decompose the agreed approach into stacked tasks following these principles:
 
@@ -58,7 +80,7 @@ Decompose the agreed approach into stacked tasks following these principles:
 - **Layer-based when appropriate** - consider stacking: data model -> API -> UI -> tests
 - **No hard line count** - size by cohesion, not by counting lines
 
-### Phase 6: Output Plan
+### Phase 7: Output Plan
 
 Write the plan using the template below. Present it to the user for review. After approval, write it to the target project at:
 
