@@ -47,6 +47,36 @@ Run and require success:
 ```bash
 gh auth status
 gh repo view --json nameWithOwner,defaultBranchRef
+
+label_exists() {
+  local label="$1"
+  local matches
+
+  matches="$(gh label list --search "$label" --limit 100 --json name --jq '.[].name')" || {
+    echo "Preflight failed: unable to query repository labels"
+    exit 1
+  }
+
+  echo "$matches" | rg -qx "$label"
+}
+
+ensure_label() {
+  local label="$1"
+  local color="$2"
+  local description="$3"
+
+  label_exists "$label" && return 0
+
+  gh label create "$label" --color "$color" --description "$description" || {
+    echo "Label bootstrap failed for '$label'. Run:"
+    echo "gh label create \"$label\" --color \"$color\" --description \"$description\""
+    exit 1
+  }
+}
+
+ensure_label "status:todo" "0E8A16" "Task is ready to be executed."
+ensure_label "status:in-progress" "FBCA04" "Task is currently being executed."
+ensure_label "status:done" "1D76DB" "Task has been accepted and completed."
 ```
 
 Stop immediately on failure.
