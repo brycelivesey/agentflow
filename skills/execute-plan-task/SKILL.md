@@ -32,6 +32,7 @@ For each role handoff, pass a compact context packet containing:
 - Issue metadata (description, acceptance criteria, dependencies, layer, file hints)
 - Current branch and diff status
 - Retrospective outcome (difficulty, refactor decision, and follow-up if deferred)
+- Reviewer flow diagram once available (for reporter reuse)
 - Inputs needed by the next role
 - Exact expected output format and pass/fail criteria
 
@@ -153,6 +154,7 @@ All gates must pass before creating the PR:
 4. Diff is scoped to the issue (no unrelated changes).
 5. Summary is concise and includes the required trust sections.
 6. Retrospective/refactor gate is completed; required in-scope refactors are applied.
+7. Reviewer output includes a simple ASCII/pseudocode data-flow diagram.
 
 ## Roles
 
@@ -181,11 +183,22 @@ Responsibilities:
 - Check regressions and security concerns.
 - Check architectural fit with existing system (integration points, pattern consistency, layering).
 - Check diff scope cleanliness.
+- Provide a simple ASCII/pseudocode diagram of the changed data/control flow so humans can review architecture without reading source code.
 - Return verdict: `pass` or `fail` with actionable issues.
 
 Boundaries:
 - Do not edit code.
 - Do not run the test suite.
+
+Reviewer output format (required):
+- `Verdict: pass|fail`
+- `Findings: <none or actionable list>`
+- `AC coverage: <AC-by-AC check>`
+- `Flow diagram (required):` one fenced `text` block with:
+  - 3-8 nodes/components
+  - arrows (`->`) for sequence/flow
+  - max 12 lines
+  - only changed/impacted path
 
 ### Tester
 
@@ -210,6 +223,7 @@ Responsibilities:
 - Build `execution-summary.md` with required sections.
 - Keep the summary skimmable and concrete.
 - Favor bullets over long paragraphs.
+- Include the reviewer-provided flow diagram verbatim in the `Flow Diagram` section.
 
 Boundaries:
 - Do not modify code.
@@ -264,6 +278,10 @@ The reporter must produce this exact structure in `execution-summary.md`:
 - Space complexity: <if relevant>
 - Implementation complexity: <low/medium/high and why>
 - Key tradeoff: <simplicity vs efficiency, etc>
+
+## Flow Diagram
+- High-level changed path from reviewer output (ASCII/pseudocode).
+- Keep simple and human-scannable; do not exceed 12 lines.
 
 ## Verification
 - Reviewer verdict: <pass/fail>
