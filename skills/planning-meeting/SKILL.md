@@ -63,6 +63,24 @@ Create issues in dependency order.
 
 #### 6.1 Preflight (required)
 
+Before any GitHub operations, normalize local git state to `main` synced from `origin/main`:
+
+```bash
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Preflight failed: working tree must be clean before switching to main"
+  exit 1
+fi
+
+git fetch origin
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  git checkout main
+fi
+git pull --ff-only origin main
+```
+
+If this fails, stop and report the error.
+
 Run and require success:
 
 ```bash

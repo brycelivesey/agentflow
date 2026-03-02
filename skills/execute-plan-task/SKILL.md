@@ -41,9 +41,27 @@ For each role handoff, pass a compact context packet containing:
 | Input | Required | Description |
 |---|---|---|
 | Issue identifier | Yes | GitHub issue number or URL for one executable task |
-| Working branch | Yes | Current branch, or auto-create from `origin/main` when on `main` |
+| Working branch | Yes | Preflight normalizes local repo to `main` synced from `origin/main`; implementation branch is created afterward |
 
 ## Preflight (Required)
+
+Before any GitHub operations, normalize local git state to `main` synced from `origin/main`:
+
+```bash
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Preflight failed: working tree must be clean before switching to main"
+  exit 1
+fi
+
+git fetch origin
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  git checkout main
+fi
+git pull --ff-only origin main
+```
+
+If this fails, stop and report the error.
 
 Run and require success:
 
