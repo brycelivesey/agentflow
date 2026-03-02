@@ -195,7 +195,6 @@ Reviewer output format (required):
 - `Findings: <none or actionable list>`
 - `AC coverage: <AC-by-AC check>`
 - `Flow diagram (required):` one fenced `text` block that:
-  - stays quick to read (target ~3-5 minutes to understand)
   - is accurate to the implemented flow/architecture
   - includes enough detail to explain impacted components and boundaries
   - stays focused on changed/impacted paths rather than the full system
@@ -282,7 +281,7 @@ The reporter must produce this exact structure in `execution-summary.md`:
 ## Flow Diagram
 - High-level changed path from reviewer output (ASCII/pseudocode).
 - Keep simple and human-scannable while preserving enough detail for architectural understanding.
-- Target a diagram that can be understood in roughly 3-5 minutes without reading source code.
+- Ensure the diagram is accurate to the implemented behavior and detailed enough to understand the full impacted flow without reading source code.
 
 ## Verification
 - Reviewer verdict: <pass/fail>
