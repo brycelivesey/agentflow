@@ -22,6 +22,9 @@ api
 - path/to/file.ext
 - path/to/related-dir/
 
+## Feature Flags
+- none
+
 ## Status Labels
 - status:todo
 ```
@@ -54,6 +57,18 @@ Automation must parse dependencies only from the `## Dependencies` section.
 - Paths are hints for implementation and review.
 - Paths do not override acceptance criteria or expand task scope.
 
+## Feature Flags Contract
+
+`## Feature Flags` is required and must contain either:
+
+- `- none`
+- One or more flag keys as `- <flag_key>`, where `<flag_key>` matches `^[a-z][a-z0-9_-]*$`
+
+If flags are listed:
+
+- Keep new behavior behind those flags.
+- State the default state (`off` unless explicitly justified) in acceptance criteria.
+
 ## Status Label Contract
 
 Exactly one status label must be present on the issue at all times:
@@ -83,6 +98,9 @@ api
 
 ## File Hints
 - templates/github-issue-task.md
+
+## Feature Flags
+- none
 
 ## Status Labels
 - status:todo

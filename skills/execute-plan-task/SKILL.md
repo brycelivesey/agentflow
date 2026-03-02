@@ -54,6 +54,20 @@ gh repo view --json nameWithOwner,defaultBranchRef
 
 Stop immediately on failure.
 
+Then ensure required status labels exist (create if missing):
+
+```bash
+ensure_label() {
+  local name="$1" color="$2" description="$3"
+  gh label create "$name" --color "$color" --description "$description" 2>/dev/null \
+    || gh label edit "$name" --color "$color" --description "$description"
+}
+
+ensure_label "status:todo" "0E8A16" "Task is defined but not yet started"
+ensure_label "status:in-progress" "FBCA04" "Task is actively being worked on"
+ensure_label "status:done" "1D76DB" "Task is complete and accepted"
+```
+
 ## Resolve the Task from Issue (Required)
 
 Read the issue:
@@ -68,6 +82,7 @@ Extract from issue body:
 - `## Dependencies`
 - `## Layer`
 - `## File Hints`
+- `## Feature Flags` (optional; treat missing as `- none` for backward compatibility)
 - `## Status Labels`
 
 Use `templates/github-issue-task.md` as the canonical contract.
@@ -78,6 +93,7 @@ Before implementation, validate the issue body schema. Required checks:
 - All required section headers exist.
 - `## Layer` is one of `data|api|ui|test|infra`.
 - `## Dependencies` uses only `- none` or `- #<issue_number>` and no duplicates.
+- If `## Feature Flags` exists, entries are either `- none` or `- <flag_key>` where `<flag_key>` matches `^[a-z][a-z0-9_-]*$`.
 - `## Status Labels` has exactly one entry from `status:todo|status:in-progress|status:done`.
 
 If schema validation fails, stop and report the exact failure.
@@ -155,6 +171,7 @@ All gates must pass before creating the PR:
 5. Summary is concise and includes the required trust sections.
 6. Retrospective/refactor gate is completed; required in-scope refactors are applied.
 7. Reviewer output includes a simple ASCII/pseudocode data-flow diagram.
+8. PR body includes `Closes #<issue_number>` so merge auto-closes the issue.
 
 ## Roles
 
@@ -311,6 +328,7 @@ Commit only files required for this issue.
 3. Assemble PR body from summary
 
 Use `execution-summary.md` as the primary body content.
+Append `Closes #<number>` to the PR body so merging auto-closes the linked issue.
 
 Suggested PR body layout:
 
@@ -322,6 +340,7 @@ Suggested PR body layout:
 <content from execution-summary.md sections>
 
 ---
+Closes #<number>
 Source issue: #<number> <issue_url>
 ```
 
@@ -344,7 +363,8 @@ gh issue comment <issue_number> --body "Opened PR: <pr_url>"
 6. Status after PR creation
 
 - Keep issue at `status:in-progress` while PR is under review.
-- Move to `status:done` only after human acceptance/merge.
+- On merge, issue should auto-close via `Closes #<number>` in PR body.
+- Move to `status:done` only after human acceptance/merge (manually or via repository automation).
 
 ## Failure Policy
 

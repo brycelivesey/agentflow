@@ -54,6 +54,8 @@ Break the work into stacked tasks:
 - Explicit acceptance criteria.
 - Explicit dependencies.
 - Layer tag per task: `data|api|ui|test|infra`.
+- Explicit feature-flag decision per task: `- none` or one or more concrete flag keys.
+- If a task uses a flag, include default state and rollout intent in acceptance criteria.
 
 ### Phase 6: Create GitHub Issues (Required)
 
@@ -70,6 +72,20 @@ gh repo view --json nameWithOwner
 
 If either command fails, stop and report the error.
 
+Then ensure required status labels exist (create if missing):
+
+```bash
+ensure_label() {
+  local name="$1" color="$2" description="$3"
+  gh label create "$name" --color "$color" --description "$description" 2>/dev/null \
+    || gh label edit "$name" --color "$color" --description "$description"
+}
+
+ensure_label "status:todo" "0E8A16" "Task is defined but not yet started"
+ensure_label "status:in-progress" "FBCA04" "Task is actively being worked on"
+ensure_label "status:done" "1D76DB" "Task is complete and accepted"
+```
+
 #### 6.2 Issue body contract (required)
 
 Every issue body must include these sections:
@@ -79,13 +95,18 @@ Every issue body must include these sections:
 3. `## Dependencies`
 4. `## Layer`
 5. `## File Hints`
-6. `## Status Labels`
+6. `## Feature Flags`
+7. `## Status Labels`
 
 Validation rules:
 - `## Layer` value is exactly one of `data|api|ui|test|infra`.
 - `## Dependencies` entries are only `- none` or `- #<issue_number>`.
 - If `- none` is present, it is the only dependency entry.
 - Dependency references are unique.
+- `## Feature Flags` entries are either:
+  - `- none`, or
+  - one or more `- <flag_key>` where `<flag_key>` matches `^[a-z][a-z0-9_-]*$`.
+- If `## Feature Flags` is not `- none`, acceptance criteria explicitly states default state and rollout intent.
 - `## Status Labels` has exactly one entry and it is one of:
   - `- status:todo`
   - `- status:in-progress`
@@ -103,6 +124,7 @@ for header in \
   "## Dependencies" \
   "## Layer" \
   "## File Hints" \
+  "## Feature Flags" \
   "## Status Labels"; do
   rg -q "^${header}$" "$TASK_BODY_FILE" || {
     echo "Schema error: missing ${header}"
@@ -137,6 +159,46 @@ awk '
   echo "Schema error: invalid dependencies block"
   exit 1
 }
+
+awk '
+  BEGIN { count=0; none_count=0; ok=1 }
+  /^## Feature Flags$/ { in_flags=1; next }
+  /^## / { in_flags=0 }
+  in_flags {
+    if ($0 ~ /^[[:space:]]*$/) next
+    if ($0 !~ /^- /) { ok=0; next }
+    count++
+    if ($0 == "- none") { none_count++; next }
+    if ($0 ~ /^- [a-z][a-z0-9_-]*$/) next
+    ok=0
+  }
+  END { if (count==0 || ok==0 || (none_count>0 && count!=1)) exit 1 }
+' "$TASK_BODY_FILE" || {
+  echo "Schema error: invalid feature flags block"
+  exit 1
+}
+
+HAS_FEATURE_FLAGS=0
+if awk '
+  /^## Feature Flags$/ { in_flags=1; next }
+  /^## / { in_flags=0 }
+  in_flags && $0 ~ /^- [a-z][a-z0-9_-]*$/ { found=1 }
+  END { exit(found ? 0 : 1) }
+' "$TASK_BODY_FILE"; then
+  HAS_FEATURE_FLAGS=1
+fi
+
+if [ "$HAS_FEATURE_FLAGS" -eq 1 ]; then
+  AC_BLOCK="$(awk '/^## Acceptance Criteria$/{f=1;next}/^## /{f=0}f' "$TASK_BODY_FILE")"
+  printf '%s\n' "$AC_BLOCK" | rg -qi 'default[[:space:]]*:[[:space:]]*(on|off)' || {
+    echo "Schema error: acceptance criteria must include feature-flag default state (default: on|off)"
+    exit 1
+  }
+  printf '%s\n' "$AC_BLOCK" | rg -qi 'rollout[[:space:]]*:' || {
+    echo "Schema error: acceptance criteria must include rollout intent (rollout: ...)"
+    exit 1
+  }
+fi
 
 STATUS_COUNT="$(awk '/^## Status Labels$/{f=1;next}/^## /{f=0}f' "$TASK_BODY_FILE" | rg -c '^- ')"
 if [ "$STATUS_COUNT" -ne 1 ] || ! awk '/^## Status Labels$/{f=1;next}/^## /{f=0}f' "$TASK_BODY_FILE" | rg -q '^- status:(todo|in-progress|done)$'; then
