@@ -194,11 +194,11 @@ Reviewer output format (required):
 - `Verdict: pass|fail`
 - `Findings: <none or actionable list>`
 - `AC coverage: <AC-by-AC check>`
-- `Flow diagram (required):` one fenced `text` block with:
-  - 3-8 nodes/components
-  - arrows (`->`) for sequence/flow
-  - max 12 lines
-  - only changed/impacted path
+- `Flow diagram (required):` one fenced `text` block that:
+  - stays quick to read (target ~3-5 minutes to understand)
+  - is accurate to the implemented flow/architecture
+  - includes enough detail to explain impacted components and boundaries
+  - stays focused on changed/impacted paths rather than the full system
 
 ### Tester
 
@@ -281,7 +281,8 @@ The reporter must produce this exact structure in `execution-summary.md`:
 
 ## Flow Diagram
 - High-level changed path from reviewer output (ASCII/pseudocode).
-- Keep simple and human-scannable; do not exceed 12 lines.
+- Keep simple and human-scannable while preserving enough detail for architectural understanding.
+- Target a diagram that can be understood in roughly 3-5 minutes without reading source code.
 
 ## Verification
 - Reviewer verdict: <pass/fail>
