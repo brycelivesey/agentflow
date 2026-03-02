@@ -1,6 +1,6 @@
 ---
 name: execute-plan-task
-description: Use when executing one GitHub Issue task created by the planning-meeting skill. This skill runs one issue at a time through a strict sequential workflow (implement, review, test, summarize) and creates a PR with a concise trust-focused summary. Triggers on phrases like "execute task", "run task", "start task", "implement task", "work on issue #N", or "execute issue N".
+description: Use when executing one GitHub Issue task created by the planning-meeting skill. This skill runs one issue at a time through a strict sequential workflow (implement, reflect/refactor, review, test, summarize) and creates a PR with a concise trust-focused summary. Triggers on phrases like "execute task", "run task", "start task", "implement task", "work on issue #N", or "execute issue N".
 ---
 
 # Execute Plan Task
@@ -9,7 +9,7 @@ description: Use when executing one GitHub Issue task created by the planning-me
 
 Execute exactly one GitHub Issue task through a sequential multi-role workflow:
 
-`implementer -> reviewer -> tester -> reporter`
+`implementer -> retrospective/refactor gate -> reviewer -> tester -> reporter`
 
 Issue-only contract:
 - Input is a GitHub Issue number/URL, not a markdown plan file.
@@ -26,10 +26,12 @@ Use sequential sub-agent orchestration only:
 - Spawn one role at a time in strict order.
 - Wait for each role to finish before continuing.
 - Keep one active role thread unless the user explicitly requests parallel execution.
+- Do not advance to reviewer until the retrospective/refactor gate has passed.
 
 For each role handoff, pass a compact context packet containing:
 - Issue metadata (description, acceptance criteria, dependencies, layer, file hints)
 - Current branch and diff status
+- Retrospective outcome (difficulty, refactor decision, and follow-up if deferred)
 - Inputs needed by the next role
 - Exact expected output format and pass/fail criteria
 
@@ -122,6 +124,25 @@ Artifact locality:
 - `.agentflow/artifacts/` files are local working state (gitignored)
 - Do not commit artifact files
 
+## Retrospective/Refactor Gate (Required)
+
+Run this gate immediately after implementer output and before reviewer handoff.
+
+Checklist (required):
+- Rate implementation difficulty as `low|medium|high` with one concrete reason.
+- State one thing that could have been simpler or cleaner.
+- Decide `refactor-now: yes|no`.
+
+Decision policy:
+- If `refactor-now: yes`, apply the smallest in-scope refactor immediately, then refresh implementation notes before reviewer/tester.
+- If a refactor is valuable but out of scope or high-risk for this issue, keep the current diff scoped and record a concrete follow-up issue suggestion.
+
+Gate output format:
+- `difficulty: <low|medium|high> - <reason>`
+- `simpler-path: <concrete improvement>`
+- `refactor-now: <yes|no>`
+- `refactor-summary: <what changed or why deferred>`
+
 ## Non-Negotiable Gates
 
 All gates must pass before creating the PR:
@@ -131,6 +152,7 @@ All gates must pass before creating the PR:
 3. No new security vulnerabilities are introduced.
 4. Diff is scoped to the issue (no unrelated changes).
 5. Summary is concise and includes the required trust sections.
+6. Retrospective/refactor gate is completed; required in-scope refactors are applied.
 
 ## Roles
 
@@ -143,6 +165,7 @@ Responsibilities:
 - Follow repository conventions and existing architecture.
 - Keep changes scoped to issue acceptance criteria.
 - Produce brief implementation notes for handoff.
+- Run the retrospective checklist and apply any required in-scope refactor before reviewer handoff.
 
 Boundaries:
 - Do not self-approve quality gates.
@@ -199,6 +222,10 @@ On reviewer/tester failure:
 - Re-run reviewer and tester gates after fixes.
 - Maximum 3 cycles.
 
+On retrospective gate outcome:
+- If `refactor-now: yes`, return to implementer for the refactor before reviewer/tester.
+- After refactor changes, re-run reviewer and tester gates.
+
 Stop as `failed` if:
 - Dependency gate fails
 - Issue schema is invalid
@@ -241,6 +268,7 @@ The reporter must produce this exact structure in `execution-summary.md`:
 ## Verification
 - Reviewer verdict: <pass/fail>
 - Tester verdict: <pass/fail>
+- Retrospective: <difficulty + refactor decision>
 - Commands run: <command + result>
 - Residual risks: <what remains unverified>
 ```
